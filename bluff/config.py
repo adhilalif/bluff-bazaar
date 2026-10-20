@@ -32,6 +32,26 @@ CARD_TARGETS: dict[str, str] = {
 }
 
 
+RULE_MODES: tuple[str, ...] = ("full", "classic")
+
+# Monsoon season effects (one is drawn per game). Display text lives in bluff/theme.py.
+SEASON_KEYS: tuple[str, ...] = ("ship_delay", "godown_lock", "wet_godowns")
+
+# Secret merchant orders: a bonus at the end of the game if the condition holds.
+# need = minimum units held of each commodity; coins = minimum coins; lots = cargo lots won.
+# Bonuses are scaled to difficulty (see docs/SIMULATION_REPORT.md for completion rates).
+ORDERS: dict[str, dict[str, Any]] = {
+    "pepper_exporter":      {"bonus": 25, "need": {"relics": 4}},
+    "cardamom_connoisseur": {"bonus": 25, "need": {"crystals": 3}},
+    "fruit_stall":          {"bonus": 35, "need": {"energy": 2, "metals": 2}},
+    "spice_house":          {"bonus": 30, "need": {"relics": 2, "crystals": 2}},
+    "coconut_king":         {"bonus": 30, "need": {"spices": 5}},
+    "full_stall":           {"bonus": 40, "need": {c: 1 for c in COMMODITIES}},
+    "cash_chest":           {"bonus": 30, "coins": 100},
+    "harbour_baron":        {"bonus": 25, "lots": 2},
+}
+
+
 @dataclass(frozen=True)
 class GameConfig:
     num_players: int = 4
@@ -58,8 +78,25 @@ class GameConfig:
     customs_threshold: int = 6
     customs_fee: int = 1
     turn_seconds: int = 90
+    # --- Full Bazaar rules (ignored when rules == "classic") ---
+    rules: str = "full"
+    perishables: tuple[str, ...] = ("energy", "metals")  # Chakka, Nendran
+    spoil_threshold: int = 3            # hold this many of a perishable at round end -> lose 1
+    season_start: int = 4               # monsoon season rounds (inclusive)
+    season_end: int = 6
+    season_max_qty: int = 3             # "ship delay" season: max units per trade
+    wet_spoil_threshold: int = 2        # "wet godowns" season: perishables spoil sooner
+    lot_min_qty: int = 2                # harbour cargo lot size range
+    lot_max_qty: int = 3
+    lot_min_bid: int = 1
+    lot_reserve_pct: int = 50           # minimum bid = this % of the lot's value at the round's prices
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "perishables", tuple(self.perishables))
+        if self.rules not in RULE_MODES:
+            raise ValueError(f"rules must be one of {RULE_MODES}")
+        if not set(self.perishables) <= set(COMMODITIES):
+            raise ValueError("perishables must be commodity ids")
         if self.num_players != 4:
             raise ValueError("Bluff Bazaar MVP requires exactly 4 players")
         if self.num_rounds < 1:
@@ -83,7 +120,13 @@ class GameConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GameConfig":
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        # Rooms created before Full Bazaar existed have no "rules" key: keep them on Classic rules.
+        known.setdefault("rules", "classic")
         return cls(**known)
+
+    @property
+    def full(self) -> bool:
+        return self.rules == "full"
 
     def event_move(self, commodity: str) -> int:
         base = self.starting_prices[commodity]

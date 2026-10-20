@@ -10,7 +10,7 @@ import random
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping, Optional
 
-from .config import CARD_TYPES, COMMODITIES, GameConfig, event_keys
+from .config import CARD_TYPES, COMMODITIES, ORDERS, SEASON_KEYS, GameConfig, event_keys
 from .theme import card_name, commodity_name
 
 ACTIONS = ("buy", "sell", "hold")
@@ -50,10 +50,36 @@ class Submission:
     quantity: int = 0
     card: Optional[CardPlay] = None
     is_auto: bool = False
+    bid: int = 0  # secret bid for this round's cargo lot (Full Bazaar); 0 = no bid
 
     @classmethod
     def hold(cls, is_auto: bool = False) -> "Submission":
         return cls(action="hold", is_auto=is_auto)
+
+
+@dataclass(frozen=True)
+class Lot:
+    """A public harbour cargo lot auctioned this round."""
+    commodity: str
+    quantity: int
+    min_bid: int = 1
+
+
+@dataclass(frozen=True)
+class RoundRules:
+    """Per-round rule modifiers. The default instance is exactly the Classic game."""
+    max_qty: Optional[int] = None                 # None -> config.max_trade_qty
+    unsellable: frozenset = frozenset()           # commodities that cannot be sold this round
+    perishables: tuple = ()                       # commodities that can spoil
+    spoil_threshold: Optional[int] = None         # None -> no spoilage
+    lot: Optional[Lot] = None                     # None -> no cargo auction
+    season: Optional[str] = None                  # active monsoon effect key, if any
+
+    def trade_limit(self, config: GameConfig) -> int:
+        return self.max_qty or config.max_trade_qty
+
+
+CLASSIC = RoundRules()
 
 
 @dataclass(frozen=True)
@@ -82,11 +108,70 @@ def deal_hands(seed: int, player_ids: list[str], config: GameConfig) -> dict[str
     return {pid: deck[i * config.hand_size:(i + 1) * config.hand_size] for i, pid in enumerate(player_ids)}
 
 
+def schedule_season(seed: int) -> str:
+    """The monsoon season effect for this game (public from the start)."""
+    return random.Random(f"season:{seed}").choice(SEASON_KEYS)
+
+
+def schedule_lots(seed: int, config: GameConfig) -> list[Lot]:
+    """One public cargo lot per round."""
+    rng = random.Random(f"lots:{seed}")
+    return [Lot(rng.choice(COMMODITIES), rng.randint(config.lot_min_qty, config.lot_max_qty), config.lot_min_bid)
+            for _ in range(config.num_rounds)]
+
+
+def deal_orders(seed: int, player_ids: list[str]) -> dict[str, str]:
+    """One secret merchant order per player, drawn without replacement."""
+    keys = random.Random(f"orders:{seed}").sample(sorted(ORDERS), len(player_ids))
+    return dict(zip(player_ids, keys))
+
+
+def lot_reserve(config: GameConfig, lot: Lot, prices: Mapping[str, int]) -> int:
+    """Minimum bid for a lot this round: a share of its value at the round's prices."""
+    value = lot.quantity * prices[lot.commodity]
+    return max(lot.min_bid, (value * config.lot_reserve_pct + 99) // 100)
+
+
+def in_season(config: GameConfig, round_no: int) -> bool:
+    return config.full and config.season_start <= round_no <= config.season_end
+
+
+def round_rules(config: GameConfig, seed: int, round_no: int) -> RoundRules:
+    """All rule modifiers for one round. Classic rooms always get CLASSIC."""
+    if not config.full:
+        return CLASSIC
+    season = schedule_season(seed) if in_season(config, round_no) else None
+    return RoundRules(
+        max_qty=config.season_max_qty if season == "ship_delay" else None,
+        unsellable=frozenset({"relics"}) if season == "godown_lock" else frozenset(),
+        perishables=config.perishables,
+        spoil_threshold=config.wet_spoil_threshold if season == "wet_godowns" else config.spoil_threshold,
+        lot=schedule_lots(seed, config)[round_no - 1],
+        season=season,
+    )
+
+
+def order_met(order_key: str, player: PlayerState, lots_won: int = 0) -> bool:
+    order = ORDERS[order_key]
+    if any(player.held(c) < n for c, n in order.get("need", {}).items()):
+        return False
+    if player.coins < order.get("coins", 0):
+        return False
+    return lots_won >= order.get("lots", 0)
+
+
+def order_bonus(order_key: Optional[str], player: PlayerState, lots_won: int = 0) -> int:
+    if not order_key:
+        return 0
+    return ORDERS[order_key]["bonus"] if order_met(order_key, player, lots_won) else 0
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
 
-def _check_trade(config: GameConfig, player: PlayerState, prices: Mapping[str, int], sub: Submission) -> None:
+def _check_trade(config: GameConfig, player: PlayerState, prices: Mapping[str, int], sub: Submission,
+                 rules: RoundRules = CLASSIC) -> None:
     if sub.action not in ACTIONS:
         raise InvalidAction("Unknown action.")
     if sub.action == "hold":
@@ -97,8 +182,9 @@ def _check_trade(config: GameConfig, player: PlayerState, prices: Mapping[str, i
         raise InvalidAction("Choose a valid commodity.")
     if not isinstance(sub.quantity, int) or isinstance(sub.quantity, bool):
         raise InvalidAction("Quantity must be a whole number.")
-    if not 1 <= sub.quantity <= config.max_trade_qty:
-        raise InvalidAction(f"Quantity must be between 1 and {config.max_trade_qty}.")
+    limit = rules.trade_limit(config)
+    if not 1 <= sub.quantity <= limit:
+        raise InvalidAction(f"Quantity must be between 1 and {limit}.")
     if sub.action == "buy":
         cost = sub.quantity * prices[sub.commodity]
         if cost > player.coins:
@@ -107,8 +193,39 @@ def _check_trade(config: GameConfig, player: PlayerState, prices: Mapping[str, i
             raise InvalidAction(
                 f"Inventory full: you hold {player.units()}/{config.inventory_limit} units.")
     else:
+        if sub.commodity in rules.unsellable:
+            raise InvalidAction(f"{commodity_name(sub.commodity)} cannot be sold this round (monsoon).")
         if player.held(sub.commodity) < sub.quantity:
             raise InvalidAction(f"You only hold {player.held(sub.commodity)} {commodity_name(sub.commodity)}.")
+
+
+def _after_trade(player: PlayerState, prices: Mapping[str, int], sub: Submission) -> tuple[int, int]:
+    """(coins, units) the player would have after their trade settles."""
+    if sub.action == "buy":
+        return player.coins - sub.quantity * prices[sub.commodity], player.units() + sub.quantity
+    if sub.action == "sell":
+        return player.coins + sub.quantity * prices[sub.commodity], player.units() - sub.quantity
+    return player.coins, player.units()
+
+
+def _check_bid(config: GameConfig, player: PlayerState, prices: Mapping[str, int], sub: Submission,
+               rules: RoundRules) -> None:
+    bid = sub.bid
+    if not isinstance(bid, int) or isinstance(bid, bool) or bid < 0:
+        raise InvalidAction("Bid must be a whole number of coins.")
+    if bid == 0:
+        return
+    lot = rules.lot
+    if lot is None:
+        raise InvalidAction("There is no cargo to bid on this round.")
+    reserve = lot_reserve(config, lot, prices)
+    if bid < reserve:
+        raise InvalidAction(f"Minimum bid for this cargo is {reserve}.")
+    coins, units = _after_trade(player, prices, sub)
+    if bid > coins:
+        raise InvalidAction(f"Bid too high: after your trade you would have {coins} coins.")
+    if units + lot.quantity > config.inventory_limit:
+        raise InvalidAction(f"No room for the cargo: you would hold {units}/{config.inventory_limit} units.")
 
 
 def validate_submission(
@@ -119,13 +236,15 @@ def validate_submission(
     hand: Iterable[str],
     opponent_ids: Iterable[str],
     card_played_this_round: bool = False,
+    rules: RoundRules = CLASSIC,
 ) -> None:
     """Raise InvalidAction if `sub` is not legal for `player` right now.
 
     `hand` is the list of unplayed card types the server loaded for the player;
     `opponent_ids` are the other player ids in the room.
     """
-    _check_trade(config, player, prices, sub)
+    _check_trade(config, player, prices, sub, rules)
+    _check_bid(config, player, prices, sub, rules)
     card = sub.card
     if card is None:
         return
@@ -185,14 +304,20 @@ def resolve_round(
     players: list[PlayerState],
     submissions: Mapping[str, Submission],
     event_key: str,
+    rules: RoundRules = CLASSIC,
 ) -> RoundOutcome:
-    """Resolve one round. `submissions` must contain every player (use auto-holds)."""
+    """Resolve one round. `submissions` must contain every player (use auto-holds).
+
+    With the default CLASSIC rules this is exactly the original game; Full Bazaar rules add the
+    cargo auction (after trades) and spoilage (last).
+    """
     order = sorted(players, key=lambda p: p.seat)
     missing = [p.player_id for p in order if p.player_id not in submissions]
     if missing:
         raise InvalidAction(f"missing submissions for {missing}")
 
     p0 = dict(prices)
+    start_worth = {p.player_id: net_worth(p, p0) for p in order}
     coins = {p.player_id: p.coins for p in order}
     inv = {p.player_id: {c: p.held(c) for c in COMMODITIES} for p in order}
     effects: dict[str, list[dict[str, Any]]] = {p.player_id: [] for p in order}
@@ -211,7 +336,7 @@ def resolve_round(
         if sub.action != "hold":
             current = replace(p, coins=coins[p.player_id], inventory=inv[p.player_id])
             try:
-                _check_trade(config, current, p0, sub)
+                _check_trade(config, current, p0, sub, rules)
             except InvalidAction as exc:
                 trade["reason"] = str(exc)
             else:
@@ -225,7 +350,37 @@ def resolve_round(
                 trade.update(executed=True, price=price)
         trades[p.player_id] = trade
 
-    # 2. Price movement: event + cards + demand, bounded.
+    # 2. Harbour cargo auction (Full Bazaar). Highest valid bid wins and pays it; exact ties: unsold.
+    auction: Optional[dict[str, Any]] = None
+    cargo_value = {pid: 0 for pid in coins}
+    if rules.lot is not None:
+        lot = rules.lot
+        valid_bids: dict[str, int] = {}
+        bids_public: dict[str, int] = {}
+        for p in order:
+            bid = submissions[p.player_id].bid
+            if bid <= 0:
+                continue
+            bids_public[p.player_id] = bid
+            if (bid >= lot_reserve(config, lot, p0) and bid <= coins[p.player_id]
+                    and sum(inv[p.player_id].values()) + lot.quantity <= config.inventory_limit):
+                valid_bids[p.player_id] = bid
+        winner, outcome = None, "no bids"
+        if valid_bids:
+            top = max(valid_bids.values())
+            leaders = [pid for pid, b in valid_bids.items() if b == top]
+            if len(leaders) == 1:
+                winner, outcome = leaders[0], "sold"
+                coins[winner] -= top
+                inv[winner][lot.commodity] += lot.quantity
+                cargo_value[winner] = lot.quantity * p0[lot.commodity] - top
+            else:
+                outcome = "tie"
+        auction = {"commodity": lot.commodity, "quantity": lot.quantity, "bids": bids_public,
+                   "reserve": lot_reserve(config, lot, p0),
+                   "winner": winner, "price": valid_bids.get(winner) if winner else None, "outcome": outcome}
+
+    # 3. Price movement: event + cards + demand, bounded.
     event_delta = {c: 0 for c in COMMODITIES}
     if event_key.endswith("_boom") or event_key.endswith("_bust"):
         commodity, kind = event_key.rsplit("_", 1)
@@ -257,7 +412,7 @@ def resolve_round(
     def add_effect(pid: str, kind: str, amount: int, **extra: Any) -> None:
         effects[pid].append({"kind": kind, "amount": amount, **extra})
 
-    # 3. Double Down.
+    # 4. Double Down.
     for p in order:
         card, t = card_of(p.player_id), trades[p.player_id]
         if not card or card.card_type != "double_down":
@@ -273,7 +428,7 @@ def resolve_round(
         coins[p.player_id] += swing
         add_effect(p.player_id, "double_down", swing)
 
-    # 4. Shield compensation for crash losses.
+    # 5. Shield compensation for crash losses.
     for pid in shielded:
         refund = sum(inv[pid][c] * min(max(0, p0[c] - p1[c]), crash_amount[c])
                      for c in COMMODITIES if crash_amount[c])
@@ -281,7 +436,7 @@ def resolve_round(
             coins[pid] += refund
             add_effect(pid, "shield_refund", refund)
 
-    # 5. Event coin effects.
+    # 6. Event coin effects.
     if event_key == "festival":
         for p in order:
             if trades[p.player_id]["executed"]:
@@ -299,7 +454,7 @@ def resolve_round(
             coins[p.player_id] -= fee
             add_effect(p.player_id, "customs", -fee)
 
-    # 6. Tax Collector, in the collector's seat order.
+    # 7. Tax Collector, in the collector's seat order.
     for p in order:
         card = card_of(p.player_id)
         if not card or card.card_type != "tax_collector":
@@ -318,16 +473,45 @@ def resolve_round(
         add_effect(p.player_id, "tax_collected", tax, target=target)
         add_effect(target, "tax_paid", -tax, by=p.player_id)
 
-    # 7. Snapshot.
+    # Value change from prices, measured on holdings after trades and cargo (before spoilage).
+    price_moves = {pid: sum(inv[pid][c] * (p1[c] - p0[c]) for c in COMMODITIES) for pid in coins}
+
+    # 8. Spoilage (Full Bazaar): holding >= threshold of a perishable loses one unit of it.
+    spoiled_value = {pid: 0 for pid in coins}
+    if rules.spoil_threshold is not None:
+        for p in order:
+            for c in rules.perishables:
+                if inv[p.player_id][c] >= rules.spoil_threshold:
+                    inv[p.player_id][c] -= 1
+                    spoiled_value[p.player_id] -= p1[c]
+                    add_effect(p.player_id, "spoiled", 0, commodity=c, units=1)
+
+    # 9. Snapshot.
     new_players = [replace(p, coins=coins[p.player_id], inventory=dict(inv[p.player_id])) for p in order]
     for p in new_players:
         assert p.coins >= 0 and all(q >= 0 for q in p.inventory.values())
+
+    def breakdown(p: PlayerState) -> dict[str, int]:
+        pid = p.player_id
+        end = net_worth(p, p1)
+        cards_events = sum(e["amount"] for e in effects[pid])
+        parts = {"start": start_worth[pid], "end": end, "trade_cash": trades[pid]["quantity"] * (
+                     trades[pid]["price"] or 0) * (-1 if trades[pid]["action"] == "buy" else 1)
+                 if trades[pid]["executed"] else 0,
+                 "price_moves": price_moves[pid], "cards_events": cards_events,
+                 "cargo": cargo_value[pid], "spoiled": spoiled_value[pid]}
+        # Trades at the quoted price are value-neutral, so these parts reconcile exactly.
+        assert end - start_worth[pid] == (parts["price_moves"] + cards_events + parts["cargo"] + parts["spoiled"])
+        return parts
+
     summary = {
         "round": round_no,
         "event": event_key,
         "prices_before": p0,
         "prices_after": p1,
         "movement": movement,
+        "auction": auction,
+        "season": rules.season,
         "players": [
             {
                 "player_id": p.player_id,
@@ -338,6 +522,8 @@ def resolve_round(
                 "effects": effects[p.player_id],
                 "coins_after": p.coins,
                 "net_worth": net_worth(p, p1),
+                "bid": submissions[p.player_id].bid,
+                "breakdown": breakdown(p),
             }
             for p in new_players
         ],
@@ -352,13 +538,16 @@ def _card_public(card: Optional[CardPlay]) -> Optional[dict[str, Any]]:
             "target_player": card.target_player}
 
 
-def final_ranking(players: list[PlayerState], prices: Mapping[str, int]) -> list[dict[str, Any]]:
-    """Competition ranking by net worth, then coins; exact ties share a rank."""
+def final_ranking(players: list[PlayerState], prices: Mapping[str, int],
+                  bonuses: Optional[Mapping[str, int]] = None) -> list[dict[str, Any]]:
+    """Competition ranking by net worth (incl. order bonus), then coins; exact ties share a rank."""
     rows = []
     for p in players:
-        nw = net_worth(p, prices)
-        rows.append({"player_id": p.player_id, "name": p.name, "seat": p.seat, "net_worth": nw,
-                     "coins": p.coins, "inventory_value": nw - p.coins})
+        bonus = (bonuses or {}).get(p.player_id, 0)
+        goods = net_worth(p, prices) - p.coins
+        rows.append({"player_id": p.player_id, "name": p.name, "seat": p.seat,
+                     "net_worth": p.coins + goods + bonus, "coins": p.coins, "inventory_value": goods,
+                     "order_bonus": bonus})
     rows.sort(key=lambda r: (-r["net_worth"], -r["coins"], r["seat"]))
     for i, row in enumerate(rows):
         prev = rows[i - 1] if i else None
