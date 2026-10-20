@@ -418,8 +418,9 @@ def action_panel(db: Database, code: str, token: str, view: dict) -> None:
         if not options:
             st.info("You have nothing to sell yet.")
         else:
-            commodity = st.segmented_control("Goods", options, default=options[0], key=f"com_{r}_{action}",
-                                             format_func=theme.commodity_name)
+            # Pills wrap onto several lines on narrow phones (a segmented control would scroll sideways).
+            commodity = st.pills("Goods", options, default=options[0], key=f"com_{r}_{action}",
+                                 format_func=theme.commodity_name)
             if commodity and en:
                 st.caption(f"{theme.commodity_name(commodity)} = {theme.commodity_en(commodity).lower()}")
             qty = st.segmented_control("Quantity", list(range(1, cfg["max_trade_qty"] + 1)), default=1,
@@ -448,9 +449,9 @@ def action_panel(db: Database, code: str, token: str, view: dict) -> None:
                 d = theme.CARD_DISPLAY[ctype]
                 st.caption((f"{d['en']} — " if en else "") + d["text"])
                 if CARD_TARGETS[ctype] == "commodity":
-                    target_commodity = st.segmented_control("Target goods", list(DISPLAY_ORDER),
-                                                            default=DISPLAY_ORDER[0], key=f"tc_{r}",
-                                                            format_func=theme.commodity_name)
+                    target_commodity = st.pills("Target goods", list(DISPLAY_ORDER),
+                                                default=DISPLAY_ORDER[0], key=f"tc_{r}",
+                                                format_func=theme.commodity_name)
                 elif CARD_TARGETS[ctype] == "player":
                     opponents = {p["seat"]: p["name"] for p in view["players"] if not p["is_me"]}
                     target_seat = st.radio("Target trader", list(opponents), key=f"ts_{r}", horizontal=True,

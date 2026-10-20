@@ -35,8 +35,10 @@ header[data-testid="stHeader"] { background: transparent; }
 input, textarea, select { font-size: 16px !important; }
 /* Touch targets of at least 44 CSS px. */
 .stButton button, .stFormSubmitButton button, [data-testid="stPopover"] button,
-[data-testid="stButtonGroup"] button, [data-baseweb="tab"] { min-height: 44px; }
+[data-testid="stButtonGroup"] button, [role="tab"] { min-height: 44px; }
 [data-testid="stRadio"] label, [data-testid="stCheckbox"] label { min-height: 44px; align-items: center; }
+/* Button groups wrap instead of hiding options in a sideways scroller on narrow phones. */
+[data-testid="stButtonGroup"] div { flex-wrap: wrap; overflow-x: visible; row-gap: .4rem; }
 [data-testid="stRadio"] [role="radiogroup"] { gap: .1rem .9rem; }
 /* Visible keyboard focus. */
 button:focus-visible, a:focus-visible, input:focus-visible, [role="tab"]:focus-visible,
@@ -80,6 +82,16 @@ label:has(input:focus-visible) { outline: 3px solid var(--bb-gold) !important; o
 .bb-tile .pr { font-size:1.3rem; font-weight:800; color: var(--bb-green); line-height: 1.2; }
 .bb-tile .ft { font-size:.76rem; min-height: 1.1em; }
 .bb-tile .own { color: var(--bb-gold-text); font-weight: 700; }
+@container (max-width: 499px) {
+  .bb-tile { padding: .4rem .2rem .3rem; }
+  .bb-tile img { width: 30px; height: 30px; margin: .1rem auto 0; }
+  .bb-tile .nm { font-size: .88rem; }
+  .bb-tile .pr { font-size: 1.15rem; }
+}
+@container (max-width: 340px) {
+  .bb-tile .nm { font-size: .78rem; letter-spacing: -.01em; }
+  .bb-tile .bb-en { font-size: .68rem; }
+}
 .up { color: var(--bb-up); font-weight: 700; } .down { color: var(--bb-down); font-weight: 700; } .flat { color: var(--bb-muted); }
 
 /* Rumor: a monsoon-streaked notice. */
@@ -90,7 +102,7 @@ label:has(input:focus-visible) { outline: 3px solid var(--bb-gold) !important; o
 .bb-rumor.insider b { color: var(--bb-gold-text); }
 
 .bb-stats { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:.45rem; margin:.1rem 0 .7rem; }
-.bb-stat { background: var(--bb-card); border:1px solid var(--bb-line); border-radius: 14px; text-align:center; padding:.5rem .2rem; }
+.bb-stat { background: var(--bb-card); border:1px solid var(--bb-line); border-radius: 14px; text-align:center; padding:.4rem .2rem; }
 .bb-stat .v { font-size:1.3rem; font-weight:800; color: var(--bb-teak); }
 .bb-stat .l { font-size:.72rem; color: var(--bb-muted); text-transform:uppercase; letter-spacing:.07em; }
 

@@ -1,5 +1,9 @@
 # Bluff Bazaar — Game Rules (MVP)
 
+> **Display names.** This document uses the internal ids/original names. Players see the Malabar theme
+> names from `bluff/theme.py` (e.g. Market Pump = *Vila Keri!*, Relics = *Kurumulaku*). See the mapping
+> table in the README. The rules themselves are unchanged.
+
 These rules are the specification for `bluff/engine.py`. Every rule below has a
 unit test in `tests/test_engine.py`. All defaults live in `bluff/config.py`
 (`GameConfig`) and are copied into each room when it is created, so a room's
