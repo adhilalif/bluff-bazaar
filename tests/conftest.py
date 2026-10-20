@@ -47,12 +47,20 @@ def room4(db):
     return code, tokens
 
 
+def set_events(db, code, event_key="calm"):
+    """Replace the random secret schedule so exact coin assertions are deterministic."""
+    with db.tx() as conn:
+        conn.execute("update bluff.round_events e set event_key = %s from bluff.rooms r "
+                     "where r.id = e.room_id and r.code = %s", (event_key, code))
+
+
 @pytest.fixture
 def game(db, room4):
-    """A started game. Returns (code, [tokens by seat])."""
+    """A started game with every hidden event set to Calm Day. Returns (code, [tokens by seat])."""
     code, tokens = room4
     for t in tokens:
         service.set_ready(db, code, t, True)
+    set_events(db, code)
     return code, tokens
 
 

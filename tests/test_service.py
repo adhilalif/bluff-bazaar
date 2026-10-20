@@ -111,8 +111,10 @@ class TestLobby:
             assert service.set_ready(db, code, t, True) is False
         assert view(db, code, t1)["room"]["status"] == "lobby"
 
-    def test_deal_and_schedule_persisted(self, db, game):
-        code, tokens = game
+    def test_deal_and_schedule_persisted(self, db, room4):
+        code, tokens = room4
+        for t in tokens:
+            service.set_ready(db, code, t, True)
         counts = Counter()
         for t in tokens:
             h = hand(db, code, t)
@@ -123,7 +125,7 @@ class TestLobby:
             events = [r["event_key"] for r in conn.execute(
                 "select e.event_key from bluff.round_events e join bluff.rooms r on r.id = e.room_id "
                 "where r.code = %s order by round_no", (code,))]
-        assert len(events) == 8 and set(events) <= set(event_keys())
+        assert len(events) == 8 and len(set(events)) == 8 and set(events) <= set(event_keys())
 
     def test_cannot_join_started_game(self, db, game):
         code, _ = game
@@ -363,8 +365,10 @@ class TestSecrets:
             "player_id", "seat", "name", "is_host", "is_ready", "online", "submitted", "is_me"}
         assert b["summaries"] == [] and b["me"]["submission"] is None
 
-    def test_event_schedule_hidden(self, db, game):
-        code, tokens = game
+    def test_event_schedule_hidden(self, db, room4):
+        code, tokens = room4
+        for t in tokens:
+            service.set_ready(db, code, t, True)
         with db.tx() as conn:
             events = [r["event_key"] for r in conn.execute(
                 "select e.event_key from bluff.round_events e join bluff.rooms r on r.id = e.room_id "

@@ -10,7 +10,7 @@ import pytest
 
 from bluff import service
 
-from .conftest import TEST_DSN, rid
+from .conftest import TEST_DSN, rid, set_events
 
 APP = str(Path(__file__).resolve().parent.parent / "app.py")
 
@@ -49,6 +49,7 @@ def create_game(app_env, db):
         service.set_ready(db, code, t, True)
     button(at, "✅ I'm ready").click().run()
     assert not at.exception
+    set_events(db, code)
     return at, code, token, bots
 
 
