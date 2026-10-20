@@ -242,6 +242,10 @@ def _start_game(conn: psycopg.Connection, room: dict, players: list[dict]) -> No
         for c in COMMODITIES:
             conn.execute("insert into bluff.inventories (player_id, commodity, quantity) values (%s, %s, 0) "
                          "on conflict do nothing", (pid, c))
+    if cfg.full:
+        for pid, order_key in engine.deal_orders(room["seed"], ids).items():
+            conn.execute("insert into bluff.player_orders (player_id, room_id, order_key) values (%s, %s, %s)",
+                         (pid, room["id"], order_key))
     for r, event_key in enumerate(engine.schedule_events(room["seed"], cfg), start=1):
         conn.execute("insert into bluff.round_events (room_id, round_no, event_key) values (%s, %s, %s)",
                      (room["id"], r, event_key))
@@ -385,8 +389,11 @@ def submit_action(
     card_id: Optional[str] = None,
     target_commodity: Optional[str] = None,
     target_seat: Optional[int] = None,
+    bid: int = 0,
 ) -> dict:
-    """Lock in this round's secret decision. Idempotent per request_id.
+    """Lock in this round's secret decision (trade, optional card, optional cargo bid).
+
+    Idempotent per request_id.
 
     Returns {"duplicate": bool, "resolved": bool}. Resolves the round in the same
     transaction when this is the last missing submission.
@@ -437,10 +444,15 @@ def submit_action(
             qty = int(quantity) if not isinstance(quantity, bool) and float(quantity).is_integer() else quantity
         except (TypeError, ValueError):
             raise GameError("Quantity must be a whole number.") from None
-        sub = Submission(action=action, commodity=commodity, quantity=qty, card=card_play)
+        try:
+            bid_value = int(bid or 0) if not isinstance(bid, bool) and float(bid or 0).is_integer() else -1
+        except (TypeError, ValueError):
+            raise GameError("Bid must be a whole number of coins.") from None
+        sub = Submission(action=action, commodity=commodity, quantity=qty, card=card_play, bid=bid_value)
+        rules = engine.round_rules(cfg, room["seed"], r)
         try:
             engine.validate_submission(cfg, state, prices, sub, [c["card_type"] for c in hand_rows],
-                                       [pid for pid in seats.values() if pid != str(me["id"])], played_now)
+                                       [pid for pid in seats.values() if pid != str(me["id"])], played_now, rules)
         except InvalidAction as exc:
             raise GameError(str(exc)) from None
 
@@ -451,11 +463,12 @@ def submit_action(
                 raise GameError("That card was already used.")
         conn.execute(
             "insert into bluff.submissions (room_id, round_no, player_id, request_id, action, commodity, quantity, "
-            "card_id, card_type, target_commodity, target_player_id) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "card_id, card_type, target_commodity, target_player_id, bid) "
+            "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (room["id"], r, me["id"], req, sub.action, sub.commodity, sub.quantity,
              card_row["id"] if card_row else None, card_play.card_type if card_play else None,
              card_play.target_commodity if card_play else None,
-             card_play.target_player if card_play else None))
+             card_play.target_player if card_play else None, sub.bid))
         _bump(conn, room["id"])
 
         count = conn.execute("select count(*) as n from bluff.submissions where room_id = %s and round_no = %s",
@@ -486,11 +499,13 @@ def _resolve_round(conn: psycopg.Connection, room: dict) -> None:
         if s["card_type"]:
             card = CardPlay(s["card_type"], s["target_commodity"],
                             str(s["target_player_id"]) if s["target_player_id"] else None)
-        subs[str(s["player_id"])] = Submission(s["action"], s["commodity"], s["quantity"], card, s["is_auto"])
+        subs[str(s["player_id"])] = Submission(s["action"], s["commodity"], s["quantity"], card, s["is_auto"],
+                                               bid=s["bid"])
     event_key = conn.execute("select event_key from bluff.round_events where room_id = %s and round_no = %s",
                              (room["id"], r)).fetchone()["event_key"]
 
-    outcome = engine.resolve_round(cfg, r, prices, players, subs, event_key)
+    outcome = engine.resolve_round(cfg, r, prices, players, subs, event_key,
+                                   engine.round_rules(cfg, room["seed"], r))
 
     # Insider Tip use is public after resolution (but not what it revealed).
     insiders = {str(x["player_id"]) for x in conn.execute(
@@ -511,17 +526,37 @@ def _resolve_round(conn: psycopg.Connection, room: dict) -> None:
     _log(conn, room["id"], r, "round_resolved", {"event": event_key})
 
     if r >= cfg.num_rounds:
-        for row in engine.final_ranking(outcome.players, outcome.prices):
-            conn.execute("insert into bluff.results (room_id, player_id, rank, net_worth, coins, inventory_value) "
-                         "values (%s, %s, %s, %s, %s, %s)",
+        bonuses = _order_bonuses(conn, room, outcome) if cfg.full else None
+        for row in engine.final_ranking(outcome.players, outcome.prices, bonuses):
+            conn.execute("insert into bluff.results (room_id, player_id, rank, net_worth, coins, inventory_value, "
+                         "order_bonus) values (%s, %s, %s, %s, %s, %s, %s)",
                          (room["id"], row["player_id"], row["rank"], row["net_worth"], row["coins"],
-                          row["inventory_value"]))
+                          row["inventory_value"], row["order_bonus"]))
         conn.execute("update bluff.rooms set status = 'finished', finished_at = now(), round_deadline = null "
                      "where id = %s", (room["id"],))
         _log(conn, room["id"], r, "game_finished", {})
     else:
         _open_round(conn, room, r + 1)
     _bump(conn, room["id"])
+
+
+def _order_bonuses(conn: psycopg.Connection, room: dict, outcome: engine.RoundOutcome) -> dict[str, int]:
+    """End-of-game merchant order bonuses. Cargo lots won are counted from the round summaries.
+
+    Called after the final round's summary has been saved, so every round (including the last) is read
+    from the database exactly once.
+    """
+    lots_won: dict[str, int] = {}
+    summaries = [x["summary"] for x in conn.execute(
+        "select summary from bluff.rounds where room_id = %s and summary is not null", (room["id"],))]
+    for summary in summaries:
+        auction = (summary or {}).get("auction") or {}
+        if auction.get("winner"):
+            lots_won[auction["winner"]] = lots_won.get(auction["winner"], 0) + 1
+    orders = {str(x["player_id"]): x["order_key"] for x in conn.execute(
+        "select player_id, order_key from bluff.player_orders where room_id = %s", (room["id"],))}
+    return {p.player_id: engine.order_bonus(orders.get(p.player_id), p, lots_won.get(p.player_id, 0))
+            for p in outcome.players}
 
 
 # ---------------------------------------------------------------------------
@@ -607,8 +642,10 @@ def get_view(db: Database, code: str, token: str) -> dict:
         played_now = conn.execute("select card_type from bluff.player_cards where player_id = %s "
                                   "and played_round = %s", (me["id"], r)).fetchone()
         my_sub = conn.execute(
-            "select action, commodity, quantity, card_type, target_commodity, target_player_id, is_auto "
+            "select action, commodity, quantity, card_type, target_commodity, target_player_id, is_auto, bid "
             "from bluff.submissions where player_id = %s and round_no = %s", (me["id"], r)).fetchone()
+        my_order = conn.execute("select order_key from bluff.player_orders where player_id = %s",
+                                (me["id"],)).fetchone()
         if my_sub and my_sub["target_player_id"]:
             my_sub["target_player_id"] = str(my_sub["target_player_id"])
         private = [{"round": x["round_no"], "kind": x["kind"], **x["payload"]} for x in conn.execute(
@@ -626,15 +663,22 @@ def get_view(db: Database, code: str, token: str) -> dict:
         if room["status"] == "active":
             ev = conn.execute("select event_key from bluff.round_events where room_id = %s and round_no = %s",
                               (room["id"], r)).fetchone()
+            rules = engine.round_rules(cfg, room["seed"], r)
+            public_rules = rules.to_public()
+            if rules.lot:
+                public_rules["lot"]["reserve"] = engine.lot_reserve(cfg, rules.lot, history.get(r) or cfg.starting_prices)
             current = {"round": r, "rumor": rumor_for(ev["event_key"]),
                        "rumor_subject": rumor_subject(ev["event_key"]),
-                       "seconds_left": now_info["secs_left"], "submitted_count": len(submitted)}
+                       "seconds_left": now_info["secs_left"], "submitted_count": len(submitted),
+                       "rules": public_rules}
 
         results = [
             {"player_id": str(x["player_id"]), "name": x["display_name"], "seat": x["seat"], "rank": x["rank"],
-             "net_worth": x["net_worth"], "coins": x["coins"], "inventory_value": x["inventory_value"]}
+             "net_worth": x["net_worth"], "coins": x["coins"], "inventory_value": x["inventory_value"],
+             "order_bonus": x["order_bonus"], "order": x["order_key"]}  # orders are revealed once the game ends
             for x in conn.execute(
-                "select r.*, p.display_name, p.seat from bluff.results r join bluff.players p on p.id = r.player_id "
+                "select r.*, p.display_name, p.seat, o.order_key from bluff.results r "
+                "join bluff.players p on p.id = r.player_id left join bluff.player_orders o on o.player_id = r.player_id "
                 "where r.room_id = %s order by r.rank, p.seat", (room["id"],))
         ]
 
@@ -643,8 +687,12 @@ def get_view(db: Database, code: str, token: str) -> dict:
     return {
         "room": {"code": room["code"], "status": room["status"], "round": r, "num_rounds": cfg.num_rounds,
                  "version": room["version"]},
-        "config": {k: getattr(cfg, k) for k in ("starting_coins", "inventory_limit", "max_trade_qty",
-                                                "num_rounds", "turn_seconds", "starting_prices")},
+        "config": {**{k: getattr(cfg, k) for k in ("starting_coins", "inventory_limit", "max_trade_qty",
+                                                   "num_rounds", "turn_seconds", "starting_prices", "rules",
+                                                   "season_start", "season_end", "spoil_threshold")},
+                   "perishables": list(cfg.perishables),
+                   # The monsoon effect is public from the start so players can plan for it.
+                   "season": engine.schedule_season(room["seed"]) if cfg.full else None},
         "me": {
             "player_id": str(me["id"]), "seat": me["seat"], "name": me["display_name"], "is_host": me["is_host"],
             "is_ready": me["is_ready"], "coins": state.coins,
@@ -654,6 +702,7 @@ def get_view(db: Database, code: str, token: str) -> dict:
             "card_played_this_round": played_now["card_type"] if played_now else None,
             "submission": my_sub,
             "private_log": private,
+            "order": my_order["order_key"] if my_order else None,
         },
         "players": players,
         "prices": prices,

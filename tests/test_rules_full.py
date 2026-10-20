@@ -200,8 +200,9 @@ class TestOrders:
         ("fruit_stall", {"energy": 2, "metals": 2}, 0, 0, True),
         ("full_stall", {c: 1 for c in COMMODITIES}, 0, 0, True),
         ("full_stall", {"spices": 9}, 0, 0, False),
-        ("cash_chest", {}, 100, 0, True),
-        ("cash_chest", {}, 99, 0, False),
+        ("cash_chest", {}, 150, 0, True),
+        ("cash_chest", {}, 149, 0, False),
+        ("cash_chest", {}, 100, 0, False),  # starting coins alone never earn it
         ("harbour_baron", {}, 0, 2, True),
         ("harbour_baron", {}, 0, 1, False),
     ])

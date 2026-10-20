@@ -5,6 +5,7 @@
 --
 -- 1. Replace CHANGE_ME with a long random password, run this in the Supabase SQL editor.
 -- 2. Pooler username is  bluff_app.<project-ref>  (e.g. bluff_app.abcdefghijklmnop).
+-- Run it after all migrations (001, 002, ...) so every table is covered; re-running is safe.
 
 do $$ begin
     if not exists (select 1 from pg_roles where rolname = 'bluff_app') then
@@ -24,7 +25,7 @@ declare t text;
 begin
     foreach t in array array['rooms', 'players', 'inventories', 'player_cards', 'round_events', 'rounds',
                              'market_prices', 'submissions', 'private_log', 'event_log', 'results',
-                             'schema_migrations']
+                             'schema_migrations', 'player_orders']
     loop
         execute format('drop policy if exists bluff_app_all on bluff.%I', t);
         execute format('create policy bluff_app_all on bluff.%I for all to bluff_app using (true) with check (true)', t);

@@ -563,7 +563,8 @@ class TestFullGame:
         assert len(v["results"]) == 4 and v["results"][0]["rank"] == 1
         final_prices = v["price_history"][-1]
         for res in v["results"]:
-            assert res["net_worth"] == res["coins"] + res["inventory_value"]
+            assert res["net_worth"] == res["coins"] + res["inventory_value"] + res["order_bonus"]
+            assert res["order"]  # Full Bazaar: every order is revealed at the end
         a = next(x for x in v["results"] if x["seat"] == 1)
         inv = view(db, code, tokens[0])["me"]["inventory"]
         assert a["inventory_value"] == sum(inv[c] * final_prices[c] for c in COMMODITIES)
@@ -599,3 +600,129 @@ class TestPulse:
         all_hold(db, code, tokens, 1)
         p = service.get_pulse(db, code, tokens[0])
         assert p["round"] == 2 and p["submitted"] == []
+
+
+# ------------------------------------------------------------ Full Bazaar rules
+
+def start(db, name_cfg=None):
+    code, t1 = service.create_room(db, "Ada", name_cfg)
+    tokens = [t1] + [service.join_room(db, code, n) for n in ("Bo", "Cy", "Di")]
+    for t in tokens:
+        service.set_ready(db, code, t, True)
+    from .conftest import set_events
+    set_events(db, code)
+    return code, tokens
+
+
+def pid_of(db, code, token):
+    with db.tx() as conn:
+        return str(conn.execute("select p.id from bluff.players p join bluff.rooms r on r.id = p.room_id "
+                                "where r.code = %s and p.token_hash = %s",
+                                (code, service.hash_token(token))).fetchone()["id"])
+
+
+class TestFullBazaar:
+    def test_orders_dealt_privately(self, db, game):
+        code, tokens = game
+        orders = [view(db, code, t)["me"]["order"] for t in tokens]
+        assert all(orders) and len(set(orders)) == 4
+        for i, t in enumerate(tokens):
+            blob = view_json(view(db, code, t))
+            for j, other in enumerate(orders):
+                if j != i:
+                    assert f'"{other}"' not in blob  # opponents' orders stay secret during the game
+
+    def test_public_round_rules(self, db, game):
+        code, tokens = game
+        v = view(db, code, tokens[0])
+        assert v["config"]["rules"] == "full" and v["config"]["season"] in ("ship_delay", "godown_lock", "wet_godowns")
+        lot = v["current"]["rules"]["lot"]
+        assert lot["quantity"] in (2, 3) and lot["reserve"] == -(-lot["quantity"] * v["prices"][lot["commodity"]] // 2)
+        assert v["current"]["rules"]["season"] is None  # season is rounds 4-6
+
+    def test_bid_validation_storage_and_idempotency(self, db, game):
+        code, tokens = game
+        lot = view(db, code, tokens[0])["current"]["rules"]["lot"]
+        with pytest.raises(GameError, match="Minimum bid"):
+            submit(db, code, tokens[0], bid=lot["reserve"] - 1)
+        with pytest.raises(GameError, match="whole number"):
+            submit(db, code, tokens[0], bid="lots")
+        req = rid()
+        submit(db, code, tokens[0], request_id=req, bid=lot["reserve"])
+        assert submit(db, code, tokens[0], request_id=req, bid=lot["reserve"])["duplicate"] is True
+        assert view(db, code, tokens[0])["me"]["submission"]["bid"] == lot["reserve"]
+        assert '"bid"' not in view_json(view(db, code, tokens[1])).replace('"bid": 0', "")  # opponents can't see it
+
+    def test_auction_resolves_and_persists(self, db, game):
+        code, tokens = game
+        lot = view(db, code, tokens[0])["current"]["rules"]["lot"]
+        submit(db, code, tokens[0], bid=lot["reserve"])
+        submit(db, code, tokens[1], bid=lot["reserve"] + 5)
+        submit(db, code, tokens[2])
+        submit(db, code, tokens[3])
+        v = view(db, code, tokens[1])
+        a = v["summaries"][0]["auction"]
+        assert a["winner"] == pid_of(db, code, tokens[1]) and a["price"] == lot["reserve"] + 5
+        assert v["me"]["coins"] == 100 - lot["reserve"] - 5
+        held = v["me"]["inventory"][lot["commodity"]]
+        assert held == lot["quantity"] - (1 if lot["commodity"] in ("energy", "metals") and lot["quantity"] >= 3 else 0)
+
+    def test_spoilage_persists(self, db, game):
+        code, tokens = game
+        set_state(db, code, tokens[0], inventory={"energy": 3, "relics": 4})
+        all_hold(db, code, tokens, 1)
+        inv = view(db, code, tokens[0])["me"]["inventory"]
+        assert inv["energy"] == 2 and inv["relics"] == 4
+        effects = view(db, code, tokens[0])["summaries"][0]["players"][0]["effects"]
+        assert any(e["kind"] == "spoiled" for e in effects)
+
+    def test_season_applies_in_round_four(self, db, game):
+        code, tokens = game
+        for r in (1, 2, 3):
+            all_hold(db, code, tokens, r)
+        v = view(db, code, tokens[0])
+        assert v["current"]["rules"]["season"] == v["config"]["season"]
+
+    def test_order_bonus_saved_in_results(self, db, game):
+        code, tokens = game
+        with db.tx() as conn:
+            conn.execute("update bluff.player_orders set order_key = 'pepper_exporter' where player_id = %s",
+                         (pid_of(db, code, tokens[0]),))
+        set_state(db, code, tokens[0], inventory={"relics": 4})
+        for r in range(1, 9):
+            all_hold(db, code, tokens, r)
+        res = {x["seat"]: x for x in view(db, code, tokens[1])["results"]}
+        assert res[1]["order"] == "pepper_exporter" and res[1]["order_bonus"] == 25
+        assert res[1]["net_worth"] == res[1]["coins"] + res[1]["inventory_value"] + 25
+
+    def test_classic_room_has_no_new_rules(self, db):
+        from bluff.config import GameConfig
+        code, tokens = start(db, GameConfig(rules="classic"))
+        v = view(db, code, tokens[0])
+        assert v["config"]["rules"] == "classic" and v["config"]["season"] is None and v["me"]["order"] is None
+        assert v["current"]["rules"]["lot"] is None
+        with pytest.raises(GameError, match="no cargo"):
+            submit(db, code, tokens[0], bid=10)
+        set_state(db, code, tokens[0], inventory={"energy": 5})
+        all_hold(db, code, tokens, 1)
+        assert view(db, code, tokens[0])["me"]["inventory"]["energy"] == 5  # no spoilage
+
+    def test_legacy_room_without_rules_key_stays_classic(self, db, room4):
+        code, tokens = room4
+        with db.tx() as conn:  # a room created before this release
+            conn.execute("update bluff.rooms set config = config - 'rules' where code = %s", (code,))
+        for t in tokens:
+            service.set_ready(db, code, t, True)
+        v = view(db, code, tokens[0])
+        assert v["config"]["rules"] == "classic" and v["me"]["order"] is None
+
+
+class TestMigrations:
+    def test_migration_002_is_idempotent(self, db):
+        from pathlib import Path
+        sql = (Path(__file__).resolve().parent.parent / "migrations" / "002_full_bazaar.sql").read_text()
+        with db.tx() as conn:
+            conn.execute(sql)
+            conn.execute(sql)
+            assert conn.execute("select relrowsecurity from pg_class where oid = 'bluff.player_orders'::regclass"
+                                ).fetchone()["relrowsecurity"]

@@ -78,6 +78,24 @@ class RoundRules:
     def trade_limit(self, config: GameConfig) -> int:
         return self.max_qty or config.max_trade_qty
 
+    def to_public(self) -> dict[str, Any]:
+        """JSON-safe form for the player view (all of this is public information)."""
+        return {"max_qty": self.max_qty, "unsellable": sorted(self.unsellable),
+                "perishables": list(self.perishables), "spoil_threshold": self.spoil_threshold,
+                "lot": ({"commodity": self.lot.commodity, "quantity": self.lot.quantity,
+                         "min_bid": self.lot.min_bid} if self.lot else None),
+                "season": self.season}
+
+    @classmethod
+    def from_public(cls, d: Optional[Mapping[str, Any]]) -> "RoundRules":
+        if not d:
+            return cls()
+        lot = d.get("lot")
+        return cls(max_qty=d.get("max_qty"), unsellable=frozenset(d.get("unsellable") or ()),
+                   perishables=tuple(d.get("perishables") or ()), spoil_threshold=d.get("spoil_threshold"),
+                   lot=Lot(lot["commodity"], lot["quantity"], lot["min_bid"]) if lot else None,
+                   season=d.get("season"))
+
 
 CLASSIC = RoundRules()
 

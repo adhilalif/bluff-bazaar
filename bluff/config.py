@@ -47,7 +47,7 @@ ORDERS: dict[str, dict[str, Any]] = {
     "spice_house":          {"bonus": 30, "need": {"relics": 2, "crystals": 2}},
     "coconut_king":         {"bonus": 30, "need": {"spices": 5}},
     "full_stall":           {"bonus": 40, "need": {c: 1 for c in COMMODITIES}},
-    "cash_chest":           {"bonus": 30, "coins": 100},
+    "cash_chest":           {"bonus": 30, "coins": 150},  # above the 100 starting coins: must sell well
     "harbour_baron":        {"bonus": 25, "lots": 2},
 }
 
