@@ -664,8 +664,7 @@ class TestFullBazaar:
         a = v["summaries"][0]["auction"]
         assert a["winner"] == pid_of(db, code, tokens[1]) and a["price"] == lot["reserve"] + 5
         assert v["me"]["coins"] == 100 - lot["reserve"] - 5
-        held = v["me"]["inventory"][lot["commodity"]]
-        assert held == lot["quantity"] - (1 if lot["commodity"] in ("energy", "metals") and lot["quantity"] >= 3 else 0)
+        assert v["me"]["inventory"][lot["commodity"]] == lot["quantity"]  # cargo is fresh on arrival
 
     def test_spoilage_persists(self, db, game):
         code, tokens = game

@@ -191,3 +191,54 @@ def test_double_down_lock_in_confirms_with_reaction(app_env, db):
     assert not at.exception
     assert any("Risk edukkua alle?" in t.value and "Move accepted" in t.value for t in at.toast)
     assert "Move accepted" in page_text(at) and "Iratti Labham" in page_text(at)
+
+
+def test_full_bazaar_panels_and_cargo_bid(app_env, db):
+    at, code, token, bots = create_game(app_env, db)
+    text = page_text(at)
+    assert "Secret order" in text and "Only you can see this" in text
+    assert "Kappal Cargo" in text and "rounds 4–6" in text
+    lot = service.get_view(db, code, token)["current"]["rules"]["lot"]
+    at.number_input(key="bid_1").set_value(lot["reserve"]).run()
+    button(at, "🔒 Lock in move").click().run()
+    assert not at.exception
+    assert f'cargo bid {lot["reserve"]}' in page_text(at)
+    for t in bots:
+        service.submit_action(db, code, t, 1, rid(), "hold")
+    at.run()
+    text = page_text(at)
+    assert "won by" in text and "Ada" in text  # the summary names the cargo winner
+    assert "Cargo" in text and "bb-break" in text  # reconciled breakdown line
+
+
+def test_bid_below_reserve_blocks_lock_in(app_env, db):
+    at, code, token, bots = create_game(app_env, db)
+    lot = service.get_view(db, code, token)["current"]["rules"]["lot"]
+    at.number_input(key="bid_1").set_value(max(1, lot["reserve"] - 1)).run()
+    assert any("Minimum bid" in w.value for w in at.warning)
+    assert button(at, "🔒 Lock in move").disabled
+
+
+def test_classic_mode_from_home(app_env, db):
+    at = app_env().run()
+    at.text_input[0].input("Ada")
+    at.radio[0].set_value("classic")  # form widgets are submitted together with the button
+    button(at, "Create room").click().run()
+    code, token = qp(at, "room"), qp(at, "t")
+    assert "Classic" in page_text(at)
+    for n in ("Bo", "Cy", "Di"):
+        service.set_ready(db, code, service.join_room(db, code, n), True)
+    button(at, "✅ I'm ready").click().run()
+    text = page_text(at)
+    assert "Your secret move" in text and "Secret order" not in text and "Kappal Cargo" not in text
+    assert not [n for n in at.number_input if n.key == "bid_1"]
+
+
+def test_final_screen_reveals_orders(app_env, db):
+    at, code, token, bots = create_game(app_env, db)
+    for r in range(1, 9):
+        for t in [token] + bots:
+            service.submit_action(db, code, t, r, rid(), "hold")
+    at.run()
+    text = page_text(at)
+    assert "Secret order" in text and 'data-label="Bonus"' in text

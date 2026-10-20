@@ -20,7 +20,7 @@ from psycopg_pool import PoolTimeout
 from bluff import service, theme, ui
 from bluff.config import CARD_TARGETS, DEFAULT_STARTING_PRICES, GameConfig
 from bluff.db import Database, apply_migrations, resolve_database_url
-from bluff.engine import CardPlay, InvalidAction, PlayerState, Submission, validate_submission
+from bluff.engine import CardPlay, InvalidAction, PlayerState, RoundRules, Submission, validate_submission
 from bluff.service import AuthError, GameError, StaleError
 from bluff.theme import DISPLAY_ORDER
 
@@ -178,10 +178,14 @@ def home(db: Database) -> None:
             st.caption("Sets the five starting prices. Classic Kadavu is the balanced default.")
             timer = st.select_slider("Turn timer", options=[45, 60, 90, 120, 180], value=90,
                                      format_func=lambda s: f"{s} s")
+            mode = st.radio("Rules", list(theme.RULE_MODE_DISPLAY), horizontal=True,
+                            format_func=lambda m: theme.RULE_MODE_DISPLAY[m]["name"]
+                            + (" (recommended)" if m == "full" else ""))
+            st.caption(theme.RULE_MODE_DISPLAY[mode]["text"])
             if st.form_submit_button("Create room", type="primary", use_container_width=True):
                 try:
                     prices = PRESETS[theme.MARKET_PRESETS[preset]]
-                    cfg = GameConfig(starting_prices=dict(prices), turn_seconds=int(timer))
+                    cfg = GameConfig(starting_prices=dict(prices), turn_seconds=int(timer), rules=mode)
                     code, token = service.create_room(db, name, cfg)
                 except (GameError, ValueError) as exc:
                     st.error(str(exc))
@@ -213,6 +217,14 @@ def home(db: Database) -> None:
             "then prices move from the event, cards and total demand.\n"
             "- You can hold up to **10 units**. Highest **net worth** (coins + goods) after round 8 wins.\n"
             f"- Cards: {cards}.")
+        st.markdown(
+            "**Full Bazaar adds:**\n"
+            "- 📜 **Secret order** — a private goal worth a bonus at the end; others try to guess it.\n"
+            "- 🍂 **Perishables** — hold 3+ Chakka or Nendran at round end and one spoils "
+            "(cargo you win is fresh and can't spoil that round).\n"
+            "- ⛵ **Kappal Cargo** — each round, a lot of goods goes to the highest secret bid "
+            "(minimum half its value; exact ties: nobody wins).\n"
+            "- 🌧️ **Monsoon** — rounds 4–6 have one special rule, announced at the start.")
 
 
 # ------------------------------------------------------------ live status
@@ -297,9 +309,11 @@ def lobby(db: Database, code: str, token: str, view: dict) -> None:
     cfg = view["config"]
     chips = "".join(f'<span class="bb-chip">{ui.esc(theme.commodity_name(c))} <b>{cfg["starting_prices"][c]}</b></span>'
                     for c in DISPLAY_ORDER)
-    st.markdown(f'<div class="bb-panel"><div class="bb-muted" style="margin-bottom:.3rem">Starting prices · '
-                f'{cfg["turn_seconds"]} s turns · {cfg["num_rounds"]} rounds</div><div class="bb-row">{chips}</div></div>',
-                unsafe_allow_html=True)
+    mode = theme.RULE_MODE_DISPLAY[cfg["rules"]]
+    st.markdown(f'<div class="bb-panel"><div class="bb-muted" style="margin-bottom:.3rem"><b>{ui.esc(mode["name"])}</b> · '
+                f'Starting prices · {cfg["turn_seconds"]} s turns · {cfg["num_rounds"]} rounds</div>'
+                f'<div class="bb-row">{chips}</div><div class="bb-muted" style="margin-top:.3rem">'
+                f'{ui.esc(mode["text"])}</div></div>', unsafe_allow_html=True)
     lobby_poller(db, code, token, view["room"]["version"])
 
 
@@ -338,14 +352,17 @@ def game(db: Database, code: str, token: str, view: dict) -> None:
             sign = "up" if d > 0 else ("down" if d < 0 else "flat")
             note = ('<div class="bb-muted">⏱️ Time ran out last round, so you automatically held.</div>'
                     if result["auto"] else "")
+            mine = next(row for row in view["summaries"][-1]["players"] if row["player_id"] == me["player_id"])
             st.markdown(f'<div class="bb-result"><b>Round {result["round"]} settled</b> · '
                         f'{ui.esc(theme.event_title(result["event"], en))}<br>Your net worth {result["before"]} → '
-                        f'<b>{result["after"]}</b> <span class="{sign}">({d:+d})</span>{note}</div>',
+                        f'<b>{result["after"]}</b> <span class="{sign}">({d:+d})</span>'
+                        f'{ui.breakdown_html(mine.get("breakdown"))}{note}</div>',
                         unsafe_allow_html=True)
         subject = cur.get("rumor_subject")
         gloss = f' <span class="bb-en">({ui.esc(theme.commodity_en(subject).lower())})</span>' if subject and en else ""
         st.markdown(f'<div class="bb-rumor"><b>🌧️ Rumor:</b> {ui.esc(cur["rumor"])}{gloss}</div>',
                     unsafe_allow_html=True)
+        st.markdown(ui.rules_chips_html(view["config"], r, cur.get("rules"), view["prices"], en), unsafe_allow_html=True)
         tip = next((x for x in me["private_log"] if x["kind"] == "insider_tip" and x["round"] == r), None)
         if tip:
             ev = theme.event_display(tip["event"])
@@ -355,11 +372,14 @@ def game(db: Database, code: str, token: str, view: dict) -> None:
 
         history = view["price_history"]
         previous = history[-2] if len(history) >= 2 else None
-        st.markdown(ui.market_html(view["prices"], previous, me["inventory"], en), unsafe_allow_html=True)
+        st.markdown(ui.market_html(view["prices"], previous, me["inventory"], en, cur.get("rules")),
+                    unsafe_allow_html=True)
         units = sum(me["inventory"].values())
         st.markdown(ui.stats_html([(me["coins"], "Coins"), (me["net_worth"], "Net worth"),
                                    (f"{units}/{view['config']['inventory_limit']}", "Goods held")]),
                     unsafe_allow_html=True)
+        st.markdown(ui.order_html(me.get("order"), me["inventory"], me["coins"],
+                                  ui.lots_won(view["summaries"], me["player_id"]), en), unsafe_allow_html=True)
         if me["submission"]:
             locked_panel(view)
         else:
@@ -399,6 +419,8 @@ def locked_panel(view: dict) -> None:
         target = (theme.commodity_name(sub["target_commodity"]) if sub["target_commodity"]
                   else names.get(sub["target_player_id"], ""))
         text += f' + {theme.card_label(sub["card_type"])}' + (f" → {target}" if target else "")
+    if sub.get("bid"):
+        text += f' · cargo bid {sub["bid"]}'
     st.markdown(f'<div class="bb-locked" role="status"><div style="font-size:1.1rem">🔒 Move accepted: <b>{ui.esc(text)}</b></div>'
                 f'<div class="bb-muted">Waiting for the other traders — the round settles as soon as all four '
                 f'are locked in or the timer ends.</div></div>', unsafe_allow_html=True)
@@ -407,6 +429,8 @@ def locked_panel(view: dict) -> None:
 def action_panel(db: Database, code: str, token: str, view: dict) -> None:
     me, r, cfg = view["me"], view["room"]["round"], view["config"]
     prices, en = view["prices"], english()
+    public_rules = view["current"].get("rules")
+    rules = RoundRules.from_public(public_rules)
     st.markdown('<div class="bb-h">Your secret move</div>', unsafe_allow_html=True)
 
     # Widget keys include the round number: choices survive polling and reruns, and reset each round.
@@ -414,7 +438,8 @@ def action_panel(db: Database, code: str, token: str, view: dict) -> None:
                                   format_func=lambda a: theme.ACTION_LABELS[a]) or "hold"
     commodity, qty = None, 0
     if action != "hold":
-        options = list(DISPLAY_ORDER) if action == "buy" else [c for c in DISPLAY_ORDER if me["inventory"][c] > 0]
+        options = (list(DISPLAY_ORDER) if action == "buy" else
+                   [c for c in DISPLAY_ORDER if me["inventory"][c] > 0 and c not in rules.unsellable])
         if not options:
             st.info("You have nothing to sell yet.")
         else:
@@ -423,7 +448,8 @@ def action_panel(db: Database, code: str, token: str, view: dict) -> None:
                                  format_func=theme.commodity_name)
             if commodity and en:
                 st.caption(f"{theme.commodity_name(commodity)} = {theme.commodity_en(commodity).lower()}")
-            qty = st.segmented_control("Quantity", list(range(1, cfg["max_trade_qty"] + 1)), default=1,
+            limit = rules.max_qty or cfg["max_trade_qty"]  # the monsoon can lower the per-trade limit
+            qty = st.segmented_control("Quantity", list(range(1, limit + 1)), default=1,
                                        key=f"qty_{r}_{action}") or 1
 
     card_id, target_commodity, target_seat = None, None, None
@@ -457,8 +483,16 @@ def action_panel(db: Database, code: str, token: str, view: dict) -> None:
                     target_seat = st.radio("Target trader", list(opponents), key=f"ts_{r}", horizontal=True,
                                            format_func=lambda s: opponents[s])
 
+    bid = 0
+    lot = (public_rules or {}).get("lot")
+    if lot:
+        label = f'⛵ Secret cargo bid: {lot["quantity"]} × {theme.commodity_name(lot["commodity"])}'
+        bid = int(st.number_input(label, min_value=0, max_value=max(0, me["coins"]), value=0, step=1,
+                                  key=f"bid_{r}"))
+        st.caption(f'0 = no bid. Minimum bid {lot["reserve"]}. Highest bid wins and pays it; exact ties: nobody wins.')
+
     # Client-side preview only; the server re-validates everything.
-    error = preview(view, action, commodity, qty, card_id, target_commodity, target_seat)
+    error = preview(view, action, commodity, qty, card_id, target_commodity, target_seat, bid, rules)
     if action != "hold" and commodity and not error:
         total = qty * prices[commodity]
         after = me["coins"] - total if action == "buy" else me["coins"] + total
@@ -473,10 +507,11 @@ def action_panel(db: Database, code: str, token: str, view: dict) -> None:
             flash = f"{theme.reaction('risk', en)} · {flash}"
         act(lambda: service.submit_action(
             db, code, token, r, request_id("move", code, r), action, commodity, qty, card_id,
-            target_commodity, target_seat), flash=flash)
+            target_commodity, target_seat, bid), flash=flash)
 
 
-def preview(view, action, commodity, qty, card_id, target_commodity, target_seat) -> Optional[str]:
+def preview(view, action, commodity, qty, card_id, target_commodity, target_seat, bid=0,
+            rules: RoundRules = RoundRules()) -> Optional[str]:
     me = view["me"]
     if action != "hold" and not commodity:
         return "Choose what to trade."
@@ -487,13 +522,13 @@ def preview(view, action, commodity, qty, card_id, target_commodity, target_seat
     if card_id:
         card = CardPlay(by_id[card_id]["card_type"], target_commodity,
                         seats.get(target_seat) if target_seat is not None else None)
-    sub = Submission(action, commodity if action != "hold" else None, qty if action != "hold" else 0, card)
+    sub = Submission(action, commodity if action != "hold" else None, qty if action != "hold" else 0, card, bid=bid)
     cfg = GameConfig(starting_prices=view["config"]["starting_prices"], inventory_limit=view["config"]["inventory_limit"],
                      max_trade_qty=view["config"]["max_trade_qty"])
     try:
         validate_submission(cfg, player, view["prices"], sub, [c["card_type"] for c in me["hand"]],
                             [pid for pid in seats.values() if pid != me["player_id"]],
-                            bool(me["card_played_this_round"]))
+                            bool(me["card_played_this_round"]), rules)
     except InvalidAction as exc:
         return str(exc)
     return None

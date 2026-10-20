@@ -495,11 +495,15 @@ def resolve_round(
     price_moves = {pid: sum(inv[pid][c] * (p1[c] - p0[c]) for c in COMMODITIES) for pid in coins}
 
     # 8. Spoilage (Full Bazaar): holding >= threshold of a perishable loses one unit of it.
+    #    Cargo is fresh off the ship: units won this round don't count until next round.
     spoiled_value = {pid: 0 for pid in coins}
     if rules.spoil_threshold is not None:
+        fresh = {pid: {c: 0 for c in COMMODITIES} for pid in coins}
+        if auction and auction["winner"]:
+            fresh[auction["winner"]][auction["commodity"]] = auction["quantity"]
         for p in order:
             for c in rules.perishables:
-                if inv[p.player_id][c] >= rules.spoil_threshold:
+                if inv[p.player_id][c] - fresh[p.player_id][c] >= rules.spoil_threshold:
                     inv[p.player_id][c] -= 1
                     spoiled_value[p.player_id] -= p1[c]
                     add_effect(p.player_id, "spoiled", 0, commodity=c, units=1)

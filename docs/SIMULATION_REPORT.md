@@ -93,39 +93,39 @@ Mixed matches with the order-chasing bot added (6 strategies, 4 seats).
 
 | Strategy | Games | mean | median | stdev | win_rate | bonus |
 |---|---|---|---|---|---|---|
-| pump | 2000 | 177.9 | 177.0 | 36.3 | 41.7% | 5.7 |
-| insider | 2000 | 175.6 | 174.0 | 36.3 | 40.2% | 5.6 |
-| trend | 2000 | 174.2 | 174.0 | 35.0 | 36.4% | 5.5 |
-| order | 2000 | 158.5 | 158.0 | 35.0 | 29.1% | 22.8 |
-| random | 2000 | 102.7 | 102.0 | 26.9 | 2.1% | 1.9 |
-| passive | 2000 | 100.1 | 100.0 | 12.3 | 0.4% | 3.3 |
+| pump | 2000 | 177.7 | 177.0 | 36.0 | 42.1% | 5.3 |
+| insider | 2000 | 175.5 | 174.0 | 36.0 | 40.4% | 5.2 |
+| trend | 2000 | 174.0 | 174.0 | 34.7 | 36.1% | 5.1 |
+| order | 2000 | 158.8 | 158.0 | 34.0 | 29.2% | 22.5 |
+| random | 2000 | 104.0 | 104.0 | 26.7 | 2.1% | 1.7 |
+| passive | 2000 | 96.8 | 100.0 | 6.5 | 0.1% | 0.0 |
 
-Seat win rates (1–4): 24.6% / 26.2% / 24.4% / 24.8% · tie rate 0.1% · mean first–last gap 94.8 · comeback rate 1.2% · illegal bot moves 182 · invariant errors 0
+Seat win rates (1–4): 24.4% / 26.0% / 24.5% / 25.1% · tie rate 0.2% · mean first–last gap 95.0 · comeback rate 1.4% · illegal bot moves 184 · invariant errors 0
 
 ### Mirror matches with wealth sources
 
 | Strategy (all 4 seats) | Mean net worth | Price moves | Cards & events | Cargo | Spoiled |
 |---|---|---|---|---|---|
-| passive | 103.8 | +0.0 | +0.0 | +0.0 | +0.0 |
-| random | 105.6 | +7.6 | +1.8 | +10.6 | -16.4 |
-| trend | 186.3 | +64.8 | +6.3 | +10.7 | -0.3 |
-| pump | 191.3 | +70.8 | +7.7 | +8.7 | -0.1 |
-| insider | 185.8 | +64.2 | +5.9 | +11.1 | -0.3 |
-| order | 148.4 | +17.8 | +2.9 | +8.0 | -2.0 |
+| passive | 100.0 | +0.0 | +0.0 | +0.0 | +0.0 |
+| random | 106.9 | +7.6 | +1.8 | +10.6 | -15.0 |
+| trend | 185.9 | +64.7 | +6.3 | +10.8 | -0.1 |
+| pump | 191.2 | +70.7 | +7.7 | +8.7 | -0.0 |
+| insider | 185.3 | +64.1 | +5.9 | +11.1 | -0.1 |
+| order | 148.5 | +17.7 | +2.9 | +8.0 | -1.6 |
 
 ### Secret order completion (share of games the holder met it)
 
-cardamom_connoisseur 32%, cash_chest 26%, coconut_king 23%, fruit_stall 18%, full_stall 10%, harbour_baron 39%, pepper_exporter 39%, spice_house 23%
+cardamom_connoisseur 32%, cash_chest 3%, coconut_king 23%, fruit_stall 19%, full_stall 10%, harbour_baron 39%, pepper_exporter 39%, spice_house 23%
 
 ### Classic vs Full (same seeds, line-ups, bots)
 
 | Strategy | Classic | Full |
 |---|---|---|
-| passive | 96.9 / 0.0% | 100.2 / 0.4% |
-| random | 110.8 / 1.5% | 102.5 / 1.5% |
-| trend | 170.1 / 35.3% | 177.5 / 38.7% |
-| pump | 173.9 / 44.6% | 179.3 / 43.4% |
-| insider | 172.1 / 43.5% | 178.7 / 41.1% |
+| passive | 96.9 / 0.0% | 97.0 / 0.0% |
+| random | 110.8 / 1.5% | 104.0 / 1.7% |
+| trend | 170.1 / 35.3% | 177.4 / 38.8% |
+| pump | 173.9 / 44.6% | 179.3 / 42.9% |
+| insider | 172.1 / 43.5% | 178.7 / 41.6% |
 
-Seat win rates (1–4): 26.1% / 25.3% / 24.6% / 24.0% · tie rate 0.3% · mean first–last gap 102.7 · comeback rate 0.4% · illegal bot moves 2 · invariant errors 0
+Seat win rates (1–4): 26.1% / 25.0% / 24.8% / 24.1% · tie rate 0.3% · mean first–last gap 102.9 · comeback rate 0.3% · illegal bot moves 4 · invariant errors 0
 

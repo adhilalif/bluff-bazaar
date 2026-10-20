@@ -179,3 +179,55 @@ def rumor_subject(key: str) -> Optional[str]:
 def reaction(key: str, english: bool = False) -> str:
     r = REACTIONS[key]
     return r["text"] + (f" ({r['en']})" if english else "")
+
+
+# ---------------------------------------------------------------------------
+# Full Bazaar rules (display only; logic and numbers live in bluff/config.py and bluff/engine.py)
+# ---------------------------------------------------------------------------
+RULE_MODE_DISPLAY = {
+    "full": {"name": "Full Bazaar", "text": "Secret orders, perishable fruit, harbour cargo auctions and a monsoon season."},
+    "classic": {"name": "Classic", "text": "The original game: trades, cards and market events only."},
+}
+
+ORDER_DISPLAY: dict[str, dict[str, str]] = {
+    "pepper_exporter":      {"icon": "🌿", "name": "Kurumulaku Exporter", "en": "Pepper exporter",
+                             "text": "End with 4+ Kurumulaku."},
+    "cardamom_connoisseur": {"icon": "💚", "name": "Elakka Connoisseur", "en": "Cardamom buyer",
+                             "text": "End with 3+ Elakka."},
+    "fruit_stall":          {"icon": "🍌", "name": "Pazham Kada", "en": "Fruit stall",
+                             "text": "End with 2+ Chakka and 2+ Nendran (careful: they spoil)."},
+    "spice_house":          {"icon": "🏠", "name": "Spice House", "en": "Spice house",
+                             "text": "End with 2+ Kurumulaku and 2+ Elakka."},
+    "coconut_king":         {"icon": "🥥", "name": "Thenga Muthalali", "en": "Coconut boss",
+                             "text": "End with 5+ Thenga."},
+    "full_stall":           {"icon": "🧺", "name": "Ella Saadhanavum", "en": "A bit of everything",
+                             "text": "End with at least 1 of every good."},
+    "cash_chest":           {"icon": "💰", "name": "Panappetti", "en": "Cash box",
+                             "text": "End with 150+ coins."},
+    "harbour_baron":        {"icon": "⚓", "name": "Thuramukha Muthalali", "en": "Harbour boss",
+                             "text": "Win 2+ cargo auctions."},
+}
+
+SEASON_DISPLAY: dict[str, dict[str, str]] = {
+    "ship_delay":  {"title": "Kappal Thamasam", "en": "Ships delayed", "text": "Max 3 units per trade."},
+    "godown_lock": {"title": "Godown Pootti", "en": "Pepper godowns sealed", "text": "Kurumulaku cannot be sold."},
+    "wet_godowns": {"title": "Nanavulla Godown", "en": "Damp godowns",
+                    "text": "Chakka and Nendran spoil when you hold 2 or more."},
+}
+
+CARGO_TITLE = "Kappal Cargo"   # "ship cargo"
+CARGO_EN = "Harbour cargo auction"
+
+
+def order_label(key: Optional[str], english: bool = False) -> str:
+    if not key:
+        return ""
+    d = ORDER_DISPLAY[key]
+    return f"{d['icon']} {d['name']}" + (f" ({d['en']})" if english else "")
+
+
+def season_label(key: Optional[str], english: bool = False) -> str:
+    if not key:
+        return ""
+    d = SEASON_DISPLAY[key]
+    return f"🌧️ {d['title']}" + (f" ({d['en']})" if english else "")

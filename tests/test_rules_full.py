@@ -185,10 +185,17 @@ class TestAuction:
                             rules(lot=LOT))
         assert out.summary["auction"]["outcome"] == "no bids" and by_id(out)["p1"].coins == 0
 
-    def test_won_cargo_can_spoil(self):
-        out = resolve_round(CFG, 1, PRICES, players(), holds(p1=Submission(bid=23)), "calm",
-                            rules(lot=Lot("energy", 3, 1)))  # 3 x 15 = 45 -> reserve 23
-        assert by_id(out)["p1"].inventory["energy"] == 2
+    def test_won_cargo_is_fresh_this_round_and_can_spoil_next(self):
+        lot_rules = rules(lot=Lot("energy", 3, 1))  # 3 x 15 = 45 -> reserve 23
+        out = resolve_round(CFG, 1, PRICES, players(), holds(p1=Submission(bid=23)), "calm", lot_rules)
+        assert by_id(out)["p1"].inventory["energy"] == 3  # fresh cargo doesn't spoil on arrival
+        nxt = resolve_round(CFG, 2, out.prices, out.players, holds(), "calm", rules())
+        assert by_id(nxt)["p1"].inventory["energy"] == 2
+
+    def test_fresh_cargo_does_not_shield_old_stock(self):
+        ps = players(inventories=[{"energy": 3}, {}, {}, {}])
+        out = resolve_round(CFG, 1, PRICES, ps, holds(p1=Submission(bid=23)), "calm", rules(lot=Lot("energy", 3, 1)))
+        assert by_id(out)["p1"].inventory["energy"] == 5  # 3 old (one spoils) + 3 fresh
 
 
 # ---------------------------------------------------------------- orders

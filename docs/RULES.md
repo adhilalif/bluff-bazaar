@@ -143,3 +143,52 @@ Ranking: net worth (desc), then coins (desc). Players still tied share the rank
   act as that player.
 * **Inactive rooms:** a room in the lobby or in progress with no activity for
   30 minutes is marked *abandoned* and becomes read-only.
+
+## Full Bazaar rules (room option, default)
+
+The host chooses **Full Bazaar** or **Classic** when creating a room. Classic is exactly the game above.
+Rooms created before this option existed always play Classic. Numbers below live in `GameConfig`
+(`bluff/config.py`); display names in `bluff/theme.py`.
+
+### Secret merchant orders
+At game start each player is dealt one private order (8 in the deck, no duplicates in a game). It is shown
+only to its owner and revealed to everyone on the results screen. If its condition holds at the end, its
+bonus is added to net worth (ranking uses net worth including the bonus).
+
+| Order (id) | Condition at game end | Bonus |
+|---|---|---|
+| Kurumulaku Exporter (`pepper_exporter`) | 4+ Kurumulaku | 25 |
+| Elakka Connoisseur (`cardamom_connoisseur`) | 3+ Elakka | 25 |
+| Pazham Kada (`fruit_stall`) | 2+ Chakka and 2+ Nendran | 35 |
+| Spice House (`spice_house`) | 2+ Kurumulaku and 2+ Elakka | 30 |
+| Thenga Muthalali (`coconut_king`) | 5+ Thenga | 30 |
+| Ella Saadhanavum (`full_stall`) | 1+ of every good | 40 |
+| Panappetti (`cash_chest`) | 150+ coins | 30 |
+| Thuramukha Muthalali (`harbour_baron`) | won 2+ cargo auctions | 25 |
+
+### Perishables
+Chakka (`energy`) and Nendran (`metals`) perish: at the end of each round, a player holding 3 or more of
+one of them loses 1 unit of it. Cargo won this round is fresh and does not count until the next round.
+
+### Kappal Cargo (harbour auction)
+Each round a public lot of 2–3 units of one good is offered (drawn from the room seed). With their secret
+move, players may add a bid. Minimum bid = 50% of the lot's value at the round's prices (rounded up).
+Highest valid bid wins, pays its bid to the bank and receives the units; **exact ties: nobody wins**.
+A bid must be affordable after the player's own trade and the lot must fit the inventory limit.
+Cargo units do not count toward demand. All bids are shown in the round summary.
+
+### Monsoon season (rounds 4–6)
+One effect is drawn per game and announced at the start:
+- **Kappal Thamasam** (`ship_delay`): max 3 units per trade.
+- **Godown Pootti** (`godown_lock`): Kurumulaku cannot be sold.
+- **Nanavulla Godown** (`wet_godowns`): perishables spoil when holding 2 or more.
+
+### Full Bazaar resolution order
+1. Trade settlement → 2. cargo auction → 3. price movement → 4. Double Down → 5. Shield refund →
+6. event coin effects → 7. Tax Collector → 8. spoilage → 9. snapshot. After round 8: order bonuses, then ranking.
+
+### Net-worth breakdown
+Every round summary includes, per player, `price_moves` (holdings after trades and cargo × price change),
+`cards_events` (coin effects), `cargo` (lot value at the round's prices − bid) and `spoiled` (−units × new
+price). Trades at the quoted price are value-neutral, so these four sum exactly to the net-worth change
+(enforced by an assertion and unit tests).

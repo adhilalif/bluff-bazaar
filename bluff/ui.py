@@ -9,7 +9,8 @@ from html import escape
 from typing import Any, Optional
 
 from . import theme
-from .theme import CARD_DISPLAY, COMMODITY_DISPLAY, DISPLAY_ORDER
+from .config import ORDERS
+from .theme import CARD_DISPLAY, COMMODITY_DISPLAY, DISPLAY_ORDER, ORDER_DISPLAY, SEASON_DISPLAY
 
 # Palette: kasavu ivory, forest green, antique gold, teak brown.
 CSS = """
@@ -36,6 +37,8 @@ input, textarea, select { font-size: 16px !important; }
 /* Touch targets of at least 44 CSS px. */
 .stButton button, .stFormSubmitButton button, [data-testid="stPopover"] button,
 [data-testid="stButtonGroup"] button, [role="tab"] { min-height: 44px; }
+[data-testid="stNumberInput"] button { min-height: 44px; min-width: 44px; }
+[data-testid="stNumberInput"] input { min-height: 44px; }
 [data-testid="stRadio"] label, [data-testid="stCheckbox"] label { min-height: 44px; align-items: center; }
 /* Button groups wrap instead of hiding options in a sideways scroller on narrow phones. */
 [data-testid="stButtonGroup"] div { flex-wrap: wrap; overflow-x: visible; row-gap: .4rem; }
@@ -92,6 +95,13 @@ label:has(input:focus-visible) { outline: 3px solid var(--bb-gold) !important; o
   .bb-tile .nm { font-size: .78rem; letter-spacing: -.01em; }
   .bb-tile .bb-en { font-size: .68rem; }
 }
+.bb-tile .rot { font-size:.68rem; color: var(--bb-muted); }
+.bb-tile .rot.warn { color: var(--bb-down); font-weight: 700; }
+.bb-order { border:1px solid #E8D29B; background: #FBF1DA; border-radius: 14px; padding:.55rem .8rem; margin:.1rem 0 .7rem; }
+.bb-order .t { font-family: var(--bb-heading); font-weight: 650; color: var(--bb-teak-dark); }
+.bb-order .p { font-size:.85rem; }
+.bb-order .ok { color: var(--bb-up); font-weight: 700; }
+.bb-break { font-size:.84rem; color: var(--bb-muted); margin-top:.2rem; }
 .up { color: var(--bb-up); font-weight: 700; } .down { color: var(--bb-down); font-weight: 700; } .flat { color: var(--bb-muted); }
 
 /* Rumor: a monsoon-streaked notice. */
@@ -195,17 +205,30 @@ def delta_html(before: Optional[int], after: int) -> str:
 
 
 def market_html(prices: dict[str, int], previous: Optional[dict[str, int]], inventory: dict[str, int],
-                english: bool) -> str:
+                english: bool, rules: Optional[dict] = None) -> str:
+    """Market tiles. `rules` is the public round-rules dict (perishables, spoil threshold, unsellable)."""
+    rules = rules or {}
+    perishables = set(rules.get("perishables") or ())
+    threshold = rules.get("spoil_threshold")
+    unsellable = set(rules.get("unsellable") or ())
     tiles = []
     for c in DISPLAY_ORDER:
         d = COMMODITY_DISPLAY[c]
         own = inventory.get(c, 0)
         prev = previous.get(c) if previous else None
+        note = ""
+        if c in perishables and threshold:
+            if own >= threshold:
+                note = f'<div class="rot warn">⚠ 1 spoils at round end</div>'
+            else:
+                note = f'<div class="rot">🍂 spoils at {threshold}+</div>'
+        if c in unsellable:
+            note += '<div class="rot warn">🔒 no selling</div>'
         tiles.append(
             f'<div class="bb-tile"><img src="{theme.commodity_icon(c)}" alt="{esc(d["name"])} ({esc(d["en"])})">'
             f'<div class="nm">{esc(d["name"])}</div>{en_line(d["en"], english)}'
             f'<div class="pr">{prices[c]}</div><div class="ft">{delta_html(prev, prices[c])}'
-            f'{f" · <span class=own>you ×{own}</span>" if own else ""}</div></div>')
+            f'{f" · <span class=own>you ×{own}</span>" if own else ""}</div>{note}</div>')
     return f'<div class="bb-cq"><div class="bb-market">{"".join(tiles)}</div></div>'
 
 
@@ -280,6 +303,7 @@ EFFECT_TEXT = {
     "customs": "⚓ Customs",
     "tax_collected": "💰 Chungam",
     "tax_paid": "💰 Chungam paid",
+    "spoiled": "🍂 Spoiled",
 }
 
 
@@ -293,6 +317,18 @@ def summary_html(summary: dict, names: dict[str, str], english: bool) -> str:
         moves.append(f'<span class="bb-chip">{esc(theme.commodity_name(c))} {m["before"]} → <b>{m["after"]}</b> '
                      f'{delta_html(m["before"], m["after"])}</span>')
     lines.append(f'<div class="bb-row" style="margin-bottom:.4rem">{"".join(moves)}</div>')
+    auction = summary.get("auction")
+    if auction:
+        lot = f'{auction["quantity"]} × {esc(theme.commodity_name(auction["commodity"]))}'
+        bids = ", ".join(f'{esc(names.get(pid, "?"))} {b}' for pid, b in auction["bids"].items()) or "no bids"
+        if auction["winner"]:
+            result = f'won by <b>{esc(names.get(auction["winner"], "?"))}</b> for {auction["price"]}'
+        elif auction["outcome"] == "tie":
+            result = "tied — nobody gets it"
+        else:
+            result = "unsold"
+        lines.append(f'<div class="bb-log">⛵ {esc(theme.CARGO_TITLE)} {lot}: {result} '
+                     f'<span class="bb-muted">(bids: {bids})</span></div>')
     for row in summary["players"]:
         parts = [esc(trade_text(row["trade"]))]
         card = row.get("card")
@@ -308,6 +344,9 @@ def summary_html(summary: dict, names: dict[str, str], english: bool) -> str:
         effects = []
         for e in row["effects"]:
             label = EFFECT_TEXT.get(e["kind"], e["kind"])
+            if e["kind"] == "spoiled":
+                effects.append(f'{label} 1 {esc(theme.commodity_name(e["commodity"]))}')
+                continue
             amount = f'{e["amount"]:+d}' if e["amount"] else (e.get("note") or "0")
             effects.append(f'{label} {esc(amount)}')
         effect_html = f' <span class="bb-muted">({", ".join(effects)})</span>' if effects else ""
@@ -330,10 +369,13 @@ def podium_html(results: list[dict]) -> str:
 
 def results_table_html(results: list[dict]) -> str:
     """A table on wide screens that turns into stacked cards on phones."""
-    heads = ["Rank", "Trader", "Net worth", "Coins", "Goods value"]
+    with_orders = any(r.get("order") for r in results)
+    heads = ["Rank", "Trader", "Net worth", "Coins", "Goods value"] + (["Secret order", "Bonus"] if with_orders else [])
     rows = []
     for r in results:
         vals = [r["rank"], r["name"], r["net_worth"], r["coins"], r["inventory_value"]]
+        if with_orders:
+            vals += [theme.order_label(r.get("order")), f'+{r.get("order_bonus", 0)}' if r.get("order_bonus") else "—"]
         rows.append("<tr>" + "".join(f'<td data-label="{h}">{esc(v)}</td>' for h, v in zip(heads, vals)) + "</tr>")
     return (f'<table class="bb-table"><thead><tr>{"".join(f"<th>{h}</th>" for h in heads)}</tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table>')
@@ -369,3 +411,71 @@ def round_reaction(result: Optional[dict]) -> Optional[str]:
     if result["delta"] >= theme.PROFIT_REACTION_THRESHOLD:
         return "profit"
     return None
+
+
+# ---------------------------------------------------------------------------
+# Full Bazaar panels
+# ---------------------------------------------------------------------------
+
+def lots_won(summaries: list[dict], player_id: str) -> int:
+    return sum(1 for s in summaries if (s.get("auction") or {}).get("winner") == player_id)
+
+
+def order_progress(order_key: str, inventory: dict[str, int], coins: int, won: int) -> list[tuple[str, int, int]]:
+    """(label, have, need) for each condition of an order."""
+    order = ORDERS[order_key]
+    parts = [(theme.commodity_name(c), inventory.get(c, 0), n) for c, n in order.get("need", {}).items()]
+    if "coins" in order:
+        parts.append(("coins", coins, order["coins"]))
+    if "lots" in order:
+        parts.append(("cargo lots won", won, order["lots"]))
+    return parts
+
+
+def order_html(order_key: Optional[str], inventory: dict[str, int], coins: int, won: int, english: bool) -> str:
+    if not order_key:
+        return ""
+    d = ORDER_DISPLAY[order_key]
+    parts = order_progress(order_key, inventory, coins, won)
+    done = all(have >= need for _, have, need in parts)
+    prog = " · ".join(f'{esc(label)} {min(have, need)}/{need}' for label, have, need in parts)
+    status = '<span class="ok">✓ on track</span>' if done else ""
+    gloss = f' <span class="bb-en">({esc(d["en"])})</span>' if english else ""
+    return (f'<div class="bb-order"><div class="t">📜 Secret order: {d["icon"]} {esc(d["name"])}{gloss}'
+            f' · +{ORDERS[order_key]["bonus"]}</div><div class="p">{esc(d["text"])} '
+            f'<span class="bb-muted">Progress: {prog}</span> {status}</div>'
+            f'<div class="bb-muted">Only you can see this. It is revealed at the end.</div></div>')
+
+
+def rules_chips_html(config: dict, round_no: int, rules: Optional[dict], prices: dict[str, int],
+                     english: bool) -> str:
+    """Public Full Bazaar status: the monsoon season and this round's cargo lot."""
+    if config.get("rules") != "full":
+        return ""
+    chips = []
+    season = config.get("season")
+    if season:
+        sd = SEASON_DISPLAY[season]
+        start, end = config["season_start"], config["season_end"]
+        if start <= round_no <= end:
+            chips.append(f'<span class="bb-chip warn">{esc(theme.season_label(season, english))} now: {esc(sd["text"])}</span>')
+        elif round_no < start:
+            chips.append(f'<span class="bb-chip">{esc(theme.season_label(season, english))} rounds {start}–{end}: '
+                         f'{esc(sd["text"])}</span>')
+    lot = (rules or {}).get("lot")
+    if lot:
+        chips.append(f'<span class="bb-chip gold">⛵ {esc(theme.CARGO_TITLE)}: {lot["quantity"]} × '
+                     f'{esc(theme.commodity_name(lot["commodity"]))} (worth {lot["quantity"] * prices[lot["commodity"]]}, '
+                     f'min bid {lot["reserve"]})</span>')
+    return f'<div class="bb-row" style="margin:.1rem 0 .6rem">{"".join(chips)}</div>' if chips else ""
+
+
+def breakdown_html(b: Optional[dict]) -> str:
+    """One line explaining where a round's net-worth change came from (reconciles exactly)."""
+    if not b:
+        return ""
+    parts = [("Price moves", b["price_moves"]), ("Cards & events", b["cards_events"]),
+             ("Cargo", b.get("cargo", 0)), ("Spoiled", b.get("spoiled", 0))]
+    shown = [f'{label} {v:+d}' for label, v in parts if v]
+    trade = f' · trades moved {abs(b["trade_cash"])} coins {"out" if b["trade_cash"] < 0 else "in"}' if b.get("trade_cash") else ""
+    return f'<div class="bb-break">{" · ".join(shown) or "No change in value"}{trade}</div>'
