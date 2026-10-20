@@ -1,113 +1,177 @@
-"""Presentation helpers: theme CSS and small HTML snippets for Streamlit.
+"""Presentation helpers: Kerala-themed CSS and small HTML snippets for Streamlit.
 
-Anything derived from user input (player names) MUST go through `esc()`.
+All player-facing names come from bluff/theme.py. Anything derived from user input
+(player names) MUST go through `esc()`.
 """
 from __future__ import annotations
 
 from html import escape
 from typing import Any, Optional
 
-from .config import CARD_INFO, COMMODITIES, COMMODITY_INFO, event_info
+from . import theme
+from .theme import CARD_DISPLAY, COMMODITY_DISPLAY, DISPLAY_ORDER
 
+# Palette: kasavu ivory, forest green, antique gold, teak brown.
 CSS = """
 <style>
 :root {
-  --bb-navy: #0b1328; --bb-panel: #14203d; --bb-panel-2: #1a2a4f; --bb-line: #26365e;
-  --bb-teal: #2dd4bf; --bb-gold: #fbbf24; --bb-text: #e8edf7; --bb-muted: #94a3c0;
-  --bb-up: #34d399; --bb-down: #f87171;
+  --bb-ivory: #FBF7EC; --bb-ivory-2: #F4ECD8; --bb-card: #FFFDF7; --bb-line: #E3D6B6;
+  --bb-green: #1E4D36; --bb-green-2: #2F6B4C; --bb-green-soft: #E4EEE5;
+  --bb-gold: #B08A3E; --bb-gold-soft: #D9B867; --bb-gold-text: #7A5C1C;
+  --bb-teak: #6B4226; --bb-teak-dark: #4A2E1A; --bb-text: #2E2015; --bb-muted: #6A5843;
+  --bb-up: #1F7A4D; --bb-down: #B0362A;
+  --bb-kasavu: linear-gradient(180deg, var(--bb-gold-soft) 0 2px, transparent 2px 4px, var(--bb-gold) 4px 6px);
+  --bb-heading: "Fraunces", Georgia, "Noto Serif Malayalam", serif;
+  --bb-maxw: 680px;
 }
-.stApp { background: radial-gradient(1200px 600px at 50% -200px, #18294f 0%, var(--bb-navy) 60%); }
-.block-container { max-width: 760px; padding-top: 1.2rem; padding-bottom: 4rem; }
+/* Page width + iOS safe areas (no fixed widths anywhere). */
+[data-testid="stMainBlockContainer"] {
+  max-width: var(--bb-maxw); padding-top: 1rem;
+  padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right));
+  padding-bottom: calc(3rem + env(safe-area-inset-bottom));
+}
 header[data-testid="stHeader"] { background: transparent; }
-h1, h2, h3 { letter-spacing: .01em; }
-.bb-title { text-align:center; margin: .2rem 0 1rem; }
-.bb-title .logo { font-size: 2.6rem; line-height: 1; }
-.bb-title h1 { margin: .2rem 0 0; font-size: 2rem;
-  background: linear-gradient(90deg, var(--bb-teal), var(--bb-gold)); -webkit-background-clip: text;
-  background-clip: text; color: transparent; }
-.bb-title p { color: var(--bb-muted); margin: .2rem 0 0; }
-.bb-panel { background: var(--bb-panel); border: 1px solid var(--bb-line); border-radius: 16px;
-  padding: .8rem 1rem; margin: .4rem 0 .8rem; }
-.bb-row { display:flex; gap:.6rem; align-items:center; justify-content:space-between; flex-wrap:wrap; }
-.bb-chip { display:inline-flex; align-items:center; gap:.3rem; background: var(--bb-panel-2);
-  border:1px solid var(--bb-line); border-radius: 999px; padding: .15rem .6rem; font-size:.85rem; margin:.15rem; }
-.bb-chip.gold { border-color: rgba(251,191,36,.5); color: var(--bb-gold); }
-.bb-chip.teal { border-color: rgba(45,212,191,.5); color: var(--bb-teal); }
-.bb-muted { color: var(--bb-muted); font-size: .85rem; }
-.bb-code { font-family: ui-monospace, monospace; font-size: 2.2rem; letter-spacing: .35rem; color: var(--bb-gold);
-  text-align:center; padding:.3rem 0; }
-.bb-market { display:grid; grid-template-columns: repeat(5, 1fr); gap:.45rem; margin:.4rem 0 .8rem; }
-.bb-tile { background: linear-gradient(160deg, var(--bb-panel-2), var(--bb-panel)); border:1px solid var(--bb-line);
-  border-radius: 14px; padding:.45rem .3rem; text-align:center; }
-.bb-tile .ic { font-size:1.4rem; line-height:1.2; }
-.bb-tile .nm { color: var(--bb-muted); font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; }
-.bb-tile .pr { font-size:1.25rem; font-weight:700; color: var(--bb-text); }
-.bb-tile .ft { font-size:.72rem; }
-.bb-tile .own { color: var(--bb-teal); }
-.up { color: var(--bb-up); } .down { color: var(--bb-down); } .flat { color: var(--bb-muted); }
-.bb-rumor { border-left: 4px solid var(--bb-gold); background: rgba(251,191,36,.07); border-radius: 12px;
-  padding: .6rem .9rem; margin: .4rem 0 .8rem; }
-.bb-rumor b { color: var(--bb-gold); }
-.bb-cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:.5rem; }
-.bb-card { background: linear-gradient(170deg, #1f3263, #142246); border: 1px solid rgba(45,212,191,.35);
-  border-radius: 14px; padding:.6rem .7rem; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
-.bb-card .ic { font-size:1.5rem; } .bb-card .nm { font-weight:700; color: var(--bb-gold); }
-.bb-card .tx { font-size:.8rem; color: var(--bb-muted); }
-.bb-players { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:.45rem; }
-.bb-player { background: var(--bb-panel); border:1px solid var(--bb-line); border-radius: 12px; padding:.45rem .6rem; }
-.bb-player.me { border-color: var(--bb-teal); }
-.bb-player .nm { font-weight:600; } .bb-player .st { font-size:.78rem; color: var(--bb-muted); }
-.dot { display:inline-block; width:.55rem; height:.55rem; border-radius:50%; margin-right:.3rem; }
-.dot.on { background: var(--bb-up); } .dot.off { background: #64748b; }
-.bb-stat { text-align:center; } .bb-stat .v { font-size:1.4rem; font-weight:700; color: var(--bb-gold); }
-.bb-stat .l { font-size:.75rem; color: var(--bb-muted); text-transform:uppercase; letter-spacing:.06em; }
-.bb-locked { text-align:center; border:1px dashed var(--bb-teal); border-radius:14px; padding:.9rem; margin:.4rem 0 .8rem;
-  background: rgba(45,212,191,.06); }
-.bb-podium { display:flex; align-items:flex-end; justify-content:center; gap:.5rem; margin: 1rem 0; }
-.bb-podium .col { flex:1; max-width: 200px; text-align:center; }
-.bb-podium .blk { border-radius: 14px 14px 4px 4px; padding:.6rem .3rem; font-weight:700; }
-.bb-podium .p1 .blk { height: 130px; background: linear-gradient(180deg, #fbbf24, #b7791f); color:#1b1300; }
-.bb-podium .p2 .blk { height: 95px; background: linear-gradient(180deg, #2dd4bf, #0f766e); color:#03221e; }
-.bb-podium .p3 .blk { height: 70px; background: linear-gradient(180deg, #64748b, #334155); }
-.bb-winner { text-align:center; font-size:1.6rem; font-weight:800; margin-top:.4rem;
-  background: linear-gradient(90deg, var(--bb-gold), var(--bb-teal)); -webkit-background-clip:text;
-  background-clip:text; color: transparent; }
-.bb-log { font-size:.88rem; line-height:1.5; }
-.bb-log .who { font-weight:600; }
-div[data-testid="stProgress"] > div > div > div > div { background: linear-gradient(90deg, var(--bb-teal), var(--bb-gold)); }
-.bb-stats { display:grid; grid-template-columns: repeat(3, 1fr); gap:.5rem; margin:.2rem 0 .8rem; }
-.bb-stats .bb-panel { margin:0; padding:.55rem .3rem; }
-.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primaryFormSubmit"],
-.stFormSubmitButton > button[kind="primary"] { background: linear-gradient(90deg, #14b8a6, #2dd4bf); color: #04201c; border: 0;
-  font-weight: 700; }
+/* iOS Safari zooms into inputs smaller than 16px. */
+input, textarea, select { font-size: 16px !important; }
+/* Touch targets of at least 44 CSS px. */
+.stButton button, .stFormSubmitButton button, [data-testid="stPopover"] button,
+[data-testid="stButtonGroup"] button, [data-baseweb="tab"] { min-height: 44px; }
+[data-testid="stRadio"] label, [data-testid="stCheckbox"] label { min-height: 44px; align-items: center; }
+[data-testid="stRadio"] [role="radiogroup"] { gap: .1rem .9rem; }
+/* Visible keyboard focus. */
+button:focus-visible, a:focus-visible, input:focus-visible, [role="tab"]:focus-visible,
+label:has(input:focus-visible) { outline: 3px solid var(--bb-gold) !important; outline-offset: 2px; border-radius: 8px; }
+
+.bb-brand { display:flex; align-items:center; gap:.7rem; padding:.2rem 0 .55rem; position:relative; margin-bottom:.7rem; }
+.bb-brand::after { content:""; position:absolute; left:0; right:0; bottom:0; height:6px; background: var(--bb-kasavu); }
+.bb-brand img { width: 46px; height: 46px; flex: none; }
+.bb-brand .t { font-family: var(--bb-heading); font-weight: 700; font-size: 1.7rem; color: var(--bb-green); line-height:1.05; }
+.bb-brand .s { font-size: .82rem; letter-spacing: .14em; text-transform: uppercase; color: var(--bb-gold-text); }
+.bb-brand.big { flex-direction: column; text-align: center; gap: .25rem; padding-bottom: .9rem; }
+.bb-brand.big img { width: 64px; height: 64px; }
+.bb-brand.big .t { font-size: 2.3rem; }
+.bb-intro { text-align:center; color: var(--bb-muted); margin: -.2rem 0 .8rem; }
+
+.bb-panel { background: var(--bb-card); border: 1px solid var(--bb-line); border-radius: 16px;
+  padding: .75rem .9rem; margin: .35rem 0 .75rem; box-shadow: 0 1px 0 rgba(107,66,38,.06); }
+.bb-panel.kasavu { border-top: 0; position: relative; padding-top: 1rem; overflow: hidden; }
+.bb-panel.kasavu::before { content:""; position:absolute; left:0; right:0; top:0; height:6px; background: var(--bb-kasavu); }
+.bb-h { font-family: var(--bb-heading); font-weight: 650; color: var(--bb-green); font-size: 1.15rem; margin: .5rem 0 .3rem; }
+.bb-row { display:flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+.bb-chip { display:inline-flex; align-items:center; gap:.3rem; background: var(--bb-ivory-2); color: var(--bb-text);
+  border:1px solid var(--bb-line); border-radius: 999px; padding: .2rem .65rem; font-size:.88rem; min-height: 30px; }
+.bb-chip.gold { border-color: var(--bb-gold); color: var(--bb-gold-text); font-weight: 600; }
+.bb-chip.green { background: var(--bb-green-soft); border-color: #B9D2BF; color: var(--bb-green); font-weight: 600; }
+.bb-chip.warn { background: #FBE9E5; border-color: #E9B8AE; color: var(--bb-down); font-weight: 600; }
+.bb-muted { color: var(--bb-muted); font-size: .88rem; }
+.bb-en { color: var(--bb-muted); font-size: .76rem; }
+.bb-code { font-family: ui-monospace, Menlo, monospace; font-size: 2.1rem; letter-spacing: .3rem; color: var(--bb-teak);
+  text-align:center; padding:.2rem 0; font-weight: 700; }
+
+/* Market tiles: 3 across in narrow containers, 5 across when there is room. */
+.bb-cq { container-type: inline-size; }
+.bb-market { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:.45rem; margin:.3rem 0 .7rem; }
+@container (min-width: 500px) { .bb-market { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.bb-tile { background: var(--bb-card); border:1px solid var(--bb-line); border-radius: 14px; padding:.5rem .3rem .45rem;
+  text-align:center; position: relative; overflow: hidden; }
+.bb-tile::before { content:""; position:absolute; left:0; right:0; top:0; height:4px; background: var(--bb-kasavu); opacity:.8; }
+.bb-tile img { width: 40px; height: 40px; display:block; margin: .15rem auto .1rem; }
+.bb-tile .nm { font-weight: 700; color: var(--bb-teak-dark); font-size: .95rem; line-height: 1.15; overflow-wrap:anywhere; }
+.bb-tile .pr { font-size:1.3rem; font-weight:800; color: var(--bb-green); line-height: 1.2; }
+.bb-tile .ft { font-size:.76rem; min-height: 1.1em; }
+.bb-tile .own { color: var(--bb-gold-text); font-weight: 700; }
+.up { color: var(--bb-up); font-weight: 700; } .down { color: var(--bb-down); font-weight: 700; } .flat { color: var(--bb-muted); }
+
+/* Rumor: a monsoon-streaked notice. */
+.bb-rumor { border-left: 5px solid var(--bb-green-2); border-radius: 12px; padding: .65rem .9rem; margin: .3rem 0 .7rem;
+  background: repeating-linear-gradient(105deg, rgba(47,107,76,.07) 0 2px, transparent 2px 11px), var(--bb-green-soft); }
+.bb-rumor b { color: var(--bb-green); }
+.bb-rumor.insider { border-left-color: var(--bb-gold); background: #FBF1DA; }
+.bb-rumor.insider b { color: var(--bb-gold-text); }
+
+.bb-stats { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:.45rem; margin:.1rem 0 .7rem; }
+.bb-stat { background: var(--bb-card); border:1px solid var(--bb-line); border-radius: 14px; text-align:center; padding:.5rem .2rem; }
+.bb-stat .v { font-size:1.3rem; font-weight:800; color: var(--bb-teak); }
+.bb-stat .l { font-size:.72rem; color: var(--bb-muted); text-transform:uppercase; letter-spacing:.07em; }
+
+/* Cards: teak-wood header strip, ivory body. */
+.bb-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap:.5rem; }
+.bb-card { background: var(--bb-card); border: 1px solid var(--bb-line); border-radius: 14px; overflow: hidden; }
+.bb-card .top { background: linear-gradient(90deg, var(--bb-teak-dark), var(--bb-teak)); color: #FBF3DD; padding: .45rem .7rem;
+  font-family: var(--bb-heading); font-weight: 650; display:flex; gap:.4rem; align-items:center; }
+.bb-card .bd { padding: .45rem .7rem .6rem; font-size: .86rem; }
+
+.bb-players { display:grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap:.45rem; }
+.bb-player { background: var(--bb-card); border:1px solid var(--bb-line); border-radius: 12px; padding:.5rem .65rem; }
+.bb-player.me { border: 2px solid var(--bb-green-2); }
+.bb-player .nm { font-weight:700; overflow-wrap:anywhere; } .bb-player .st { font-size:.8rem; color: var(--bb-muted); }
+.dot { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; margin-right:.3rem; vertical-align: middle; }
+.dot.on { background: var(--bb-up); } .dot.off { background: #A39580; }
+
+/* Live lock strip (updated in place by the poll fragment). */
+.bb-strip { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:.35rem; margin:.35rem 0 .2rem; }
+.bb-seat { border:1px solid var(--bb-line); border-radius: 10px; padding:.3rem .35rem; text-align:center; font-size:.8rem;
+  background: var(--bb-card); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.bb-seat.done { background: var(--bb-green-soft); border-color: #B9D2BF; color: var(--bb-green); font-weight: 700; }
+.bb-seat.me { box-shadow: inset 0 0 0 2px var(--bb-gold-soft); }
+.bb-progress { height: 8px; border-radius: 99px; background: var(--bb-ivory-2); overflow:hidden; margin:.4rem 0 .2rem;
+  border: 1px solid var(--bb-line); }
+.bb-progress > div { height: 100%; background: linear-gradient(90deg, var(--bb-green-2), var(--bb-gold)); }
+
+.bb-locked { text-align:center; border:2px dashed var(--bb-green-2); border-radius:14px; padding:.9rem; margin:.3rem 0 .7rem;
+  background: var(--bb-green-soft); }
+.bb-result { border-radius: 14px; padding: .6rem .8rem; margin: .2rem 0 .7rem; background: #FBF1DA; border:1px solid #E8D29B; }
+
+.bb-log { font-size:.9rem; line-height:1.5; padding:.3rem 0; border-bottom: 1px dashed var(--bb-line); }
+.bb-log:last-child { border-bottom: 0; }
+.bb-log .who { font-weight:700; }
+
+.bb-podium { display:flex; align-items:flex-end; justify-content:center; gap:.5rem; margin: .8rem 0; }
+.bb-podium .col { flex:1; max-width: 190px; text-align:center; min-width: 0; }
+.bb-podium .nm { font-weight: 700; overflow-wrap:anywhere; }
+.bb-podium .blk { border-radius: 14px 14px 4px 4px; padding:.6rem .3rem; font-weight:800; color: #FFFDF7; }
+.bb-podium .p1 .blk { height: 120px; background: linear-gradient(180deg, #C9A24E, var(--bb-gold)); }
+.bb-podium .p2 .blk { height: 90px; background: linear-gradient(180deg, var(--bb-green-2), var(--bb-green)); }
+.bb-podium .p3 .blk { height: 68px; background: linear-gradient(180deg, #8A5A36, var(--bb-teak)); }
+.bb-winner { text-align:center; font-family: var(--bb-heading); font-size:1.65rem; font-weight:700; color: var(--bb-green); margin-top:.3rem; }
+.bb-react { text-align:center; font-size: 1.15rem; color: var(--bb-gold-text); font-weight: 700; }
+
+/* Results table -> stacked cards on phones. */
+.bb-table { width:100%; border-collapse: separate; border-spacing: 0; font-size:.95rem; background: var(--bb-card);
+  border:1px solid var(--bb-line); border-radius: 14px; overflow:hidden; }
+.bb-table th, .bb-table td { padding:.55rem .6rem; text-align:right; border-bottom: 1px solid var(--bb-line); }
+.bb-table th { background: var(--bb-ivory-2); color: var(--bb-muted); font-weight: 600; font-size: .8rem; text-transform: uppercase; }
+.bb-table td:nth-child(2), .bb-table th:nth-child(2) { text-align:left; }
+.bb-table tr:last-child td { border-bottom: 0; }
 @media (max-width: 560px) {
-  .bb-market { grid-template-columns: repeat(3, 1fr); }
-}
-@media (max-width: 480px) {
-  .block-container { padding-left: .8rem; padding-right: .8rem; }
+  .bb-table thead { display:none; }
+  .bb-table, .bb-table tbody, .bb-table tr, .bb-table td { display:block; width:100%; }
+  .bb-table tr { border-bottom: 1px solid var(--bb-line); padding: .35rem 0; }
+  .bb-table td { border: 0; display:flex; justify-content: space-between; padding: .2rem .8rem; text-align:right; }
+  .bb-table td::before { content: attr(data-label); color: var(--bb-muted); font-size:.82rem; }
   .bb-code { font-size: 1.8rem; }
-  .bb-tile .pr { font-size: 1.15rem; }
+  .bb-brand .t { font-size: 1.45rem; }
 }
 </style>
 """
+
+
+def page_width_css(max_width: str) -> str:
+    """Per-page content width (narrow for home/lobby, wide for the game table)."""
+    return f"<style>:root {{ --bb-maxw: {max_width}; }}</style>"
 
 
 def esc(value: Any) -> str:
     return escape(str(value), quote=True)
 
 
-def commodity_label(c: Optional[str]) -> str:
-    if not c:
-        return ""
-    info = COMMODITY_INFO[c]
-    return f"{info['icon']} {info['label']}"
+def en_line(text: str, english: bool) -> str:
+    return f'<div class="bb-en">{esc(text)}</div>' if english else ""
 
 
-def card_label(card_type: Optional[str]) -> str:
-    if not card_type:
-        return "No card"
-    info = CARD_INFO[card_type]
-    return f"{info['icon']} {info['name']}"
+def brand_html(big: bool = False) -> str:
+    return (f'<div class="bb-brand{" big" if big else ""}"><img src="{theme.icon_data_uri("uru")}" alt="">'
+            f'<div><div class="t">{esc(theme.BRAND_TITLE)}</div><div class="s">{esc(theme.BRAND_TAGLINE)}</div></div></div>')
 
 
 def delta_html(before: Optional[int], after: int) -> str:
@@ -118,99 +182,117 @@ def delta_html(before: Optional[int], after: int) -> str:
     return f'<span class="{cls}">{arrow} {abs(d)}</span>'
 
 
+def market_html(prices: dict[str, int], previous: Optional[dict[str, int]], inventory: dict[str, int],
+                english: bool) -> str:
+    tiles = []
+    for c in DISPLAY_ORDER:
+        d = COMMODITY_DISPLAY[c]
+        own = inventory.get(c, 0)
+        prev = previous.get(c) if previous else None
+        tiles.append(
+            f'<div class="bb-tile"><img src="{theme.commodity_icon(c)}" alt="{esc(d["name"])} ({esc(d["en"])})">'
+            f'<div class="nm">{esc(d["name"])}</div>{en_line(d["en"], english)}'
+            f'<div class="pr">{prices[c]}</div><div class="ft">{delta_html(prev, prices[c])}'
+            f'{f" · <span class=own>you ×{own}</span>" if own else ""}</div></div>')
+    return f'<div class="bb-cq"><div class="bb-market">{"".join(tiles)}</div></div>'
+
+
 def stats_html(stats: list[tuple[Any, str]]) -> str:
-    cells = "".join(f'<div class="bb-panel bb-stat"><div class="v">{esc(v)}</div><div class="l">{esc(label)}</div></div>'
+    cells = "".join(f'<div class="bb-stat"><div class="v">{esc(v)}</div><div class="l">{esc(label)}</div></div>'
                     for v, label in stats)
     return f'<div class="bb-stats">{cells}</div>'
 
 
-def title_html() -> str:
-    return ('<div class="bb-title"><div class="logo">🏺💎⚡</div><h1>Bluff Bazaar</h1>'
-            '<p>Trade, scheme and bluff your way to the richest stall in the market.</p></div>')
-
-
-def market_html(prices: dict[str, int], previous: Optional[dict[str, int]], inventory: dict[str, int]) -> str:
-    tiles = []
-    for c in COMMODITIES:
-        info = COMMODITY_INFO[c]
-        own = inventory.get(c, 0)
-        tiles.append(
-            f'<div class="bb-tile"><div class="ic">{info["icon"]}</div><div class="nm">{info["label"]}</div>'
-            f'<div class="pr">{prices[c]}</div><div class="ft">{delta_html(previous.get(c) if previous else None, prices[c])}'
-            f'{f" · <span class=own>×{own}</span>" if own else ""}</div></div>')
-    return f'<div class="bb-market">{"".join(tiles)}</div>'
-
-
-def cards_html(cards: list[dict]) -> str:
-    if not cards:
+def cards_html(hand: list[dict], english: bool) -> str:
+    if not hand:
         return '<div class="bb-muted">No cards left in your hand.</div>'
-    out = [f'<div class="bb-card"><div class="ic">{c["icon"]}</div><div class="nm">{esc(c["name"])}</div>'
-           f'<div class="tx">{esc(c["text"])}</div></div>' for c in cards]
+    out = []
+    for c in hand:
+        d = CARD_DISPLAY[c["card_type"]]
+        out.append(f'<div class="bb-card"><div class="top"><span>{d["icon"]}</span><span>{esc(d["name"])}</span></div>'
+                   f'<div class="bd">{en_line(d["en"], english)}{esc(d["text"])}</div></div>')
     return f'<div class="bb-cards">{"".join(out)}</div>'
 
 
-def players_html(players: list[dict], scores: dict[str, int], in_game: bool) -> str:
+def players_html(players: list[dict], scores: dict[str, int], lobby: bool) -> str:
     out = []
     for p in players:
-        status = []
-        if in_game:
-            status.append("✅ locked in" if p["submitted"] else "⏳ deciding")
-        else:
+        status = [f'Seat {p["seat"]}']
+        if lobby:
             status.append("✅ ready" if p["is_ready"] else "⏳ not ready")
         if p["is_host"]:
-            status.append("👑 host")
+            status.append("host")
+        if not p["online"]:
+            status.append("offline")
         score = scores.get(p["player_id"])
         out.append(
             f'<div class="bb-player{" me" if p["is_me"] else ""}">'
-            f'<div class="nm"><span class="dot {"on" if p["online"] else "off"}"></span>'
+            f'<div class="nm"><span class="dot {"on" if p["online"] else "off"}" aria-hidden="true"></span>'
             f'{esc(p["name"])}{" (you)" if p["is_me"] else ""}</div>'
-            f'<div class="st">Seat {p["seat"]} · {" · ".join(status)}</div>'
-            + (f'<div class="st">Net worth <b style="color:var(--bb-gold)">{score}</b></div>' if score is not None else "")
+            f'<div class="st">{" · ".join(status)}</div>'
+            + (f'<div class="st">Net worth <b style="color:var(--bb-teak)">{score}</b></div>' if score is not None else "")
             + "</div>")
     return f'<div class="bb-players">{"".join(out)}</div>'
+
+
+def lock_strip_html(players: list[dict], submitted: list[int], online: list[int]) -> str:
+    cells = []
+    for p in players:
+        done = p["seat"] in submitted
+        mark = "✓" if done else ("…" if p["seat"] in online else "⚠ offline")
+        cls = "bb-seat" + (" done" if done else "") + (" me" if p["is_me"] else "")
+        label = "You" if p["is_me"] else p["name"]
+        cells.append(f'<div class="{cls}">{esc(label)} {mark}</div>')
+    return f'<div class="bb-strip" role="status" aria-live="polite">{"".join(cells)}</div>'
+
+
+def progress_html(fraction: float) -> str:
+    pct = max(0.0, min(1.0, fraction)) * 100
+    return f'<div class="bb-progress" aria-hidden="true"><div style="width:{pct:.1f}%"></div></div>'
 
 
 def trade_text(trade: dict) -> str:
     if trade["action"] == "hold":
         return "held" + (" (timed out)" if trade.get("auto") else "")
     verb = "bought" if trade["action"] == "buy" else "sold"
-    text = f'{verb} {trade["quantity"]} {commodity_label(trade["commodity"])}'
+    name = theme.commodity_name(trade["commodity"])
     if trade["executed"]:
-        return f'{text} @ {trade["price"]}'
-    return f'tried to {trade["action"]} {trade["quantity"]} {commodity_label(trade["commodity"])} (failed)'
+        return f'{verb} {trade["quantity"]} {name} @ {trade["price"]}'
+    return f'tried to {trade["action"]} {trade["quantity"]} {name} (failed)'
 
 
 EFFECT_TEXT = {
-    "double_down": "🎲 Double Down",
-    "shield_refund": "🛡️ Shield refund",
-    "festival": "🎉 Festival bonus",
-    "customs": "🛃 Customs",
-    "tax_collected": "💰 Taxed",
-    "tax_paid": "💰 Tax paid",
+    "double_down": "🎲 Iratti Labham",
+    "shield_refund": "🛡️ Raksha refund",
+    "festival": "🌼 Onam bonus",
+    "customs": "⚓ Customs",
+    "tax_collected": "💰 Chungam",
+    "tax_paid": "💰 Chungam paid",
 }
 
 
-def summary_html(summary: dict, names: dict[str, str]) -> str:
-    ev = event_info(summary["event"])
-    lines = [f'<div class="bb-rumor"><b>{ev["icon"]} {esc(ev["name"])}</b> — {esc(ev["text"])}</div>']
+def summary_html(summary: dict, names: dict[str, str], english: bool) -> str:
+    ev = theme.event_display(summary["event"])
+    en = f' <span class="bb-en">({esc(ev["en"])})</span>' if english else ""
+    lines = [f'<div class="bb-rumor"><b>{esc(theme.event_title(summary["event"]))}</b>{en} — {esc(ev["text"])}</div>']
     moves = []
-    for c in COMMODITIES:
+    for c in DISPLAY_ORDER:
         m = summary["movement"][c]
-        moves.append(f'<span class="bb-chip">{COMMODITY_INFO[c]["icon"]} {m["before"]} → <b>{m["after"]}</b> '
+        moves.append(f'<span class="bb-chip">{esc(theme.commodity_name(c))} {m["before"]} → <b>{m["after"]}</b> '
                      f'{delta_html(m["before"], m["after"])}</span>')
-    lines.append(f'<div>{"".join(moves)}</div>')
+    lines.append(f'<div class="bb-row" style="margin-bottom:.4rem">{"".join(moves)}</div>')
     for row in summary["players"]:
-        parts = [trade_text(row["trade"])]
+        parts = [esc(trade_text(row["trade"]))]
         card = row.get("card")
         if card:
             target = ""
             if card.get("target_commodity"):
-                target = f' on {commodity_label(card["target_commodity"])}'
+                target = f' on {esc(theme.commodity_name(card["target_commodity"]))}'
             elif card.get("target_player"):
                 target = f' on {esc(names.get(card["target_player"], "?"))}'
-            parts.append(f'played {card_label(card["type"])}{target}')
+            parts.append(f'played {esc(theme.card_label(card["type"]))}{target}')
         if row.get("insider_tip"):
-            parts.append("consulted an 🔍 Insider")
+            parts.append(f'used {esc(theme.card_label("insider_tip"))}')
         effects = []
         for e in row["effects"]:
             label = EFFECT_TEXT.get(e["kind"], e["kind"])
@@ -218,7 +300,7 @@ def summary_html(summary: dict, names: dict[str, str]) -> str:
             effects.append(f'{label} {esc(amount)}')
         effect_html = f' <span class="bb-muted">({", ".join(effects)})</span>' if effects else ""
         lines.append(f'<div class="bb-log"><span class="who">{esc(row["name"])}</span> {"; ".join(parts)}'
-                     f'{effect_html} → <b style="color:var(--bb-gold)">{row["net_worth"]}</b></div>')
+                     f'{effect_html} → <b style="color:var(--bb-teak)">{row["net_worth"]}</b></div>')
     return "".join(lines)
 
 
@@ -229,8 +311,49 @@ def podium_html(results: list[dict]) -> str:
     cols = []
     for i in order:
         r = top[i]
-        place = min(i + 1, 3)
-        cols.append(f'<div class="col p{place}"><div>{medal.get(r["rank"], "🏅")}</div>'
-                    f'<div style="font-weight:700">{esc(r["name"])}</div>'
-                    f'<div class="blk">{r["net_worth"]} 🪙</div></div>')
+        cols.append(f'<div class="col p{min(i + 1, 3)}"><div>{medal.get(r["rank"], "🏅")}</div>'
+                    f'<div class="nm">{esc(r["name"])}</div><div class="blk">{r["net_worth"]}</div></div>')
     return f'<div class="bb-podium">{"".join(cols)}</div>'
+
+
+def results_table_html(results: list[dict]) -> str:
+    """A table on wide screens that turns into stacked cards on phones."""
+    heads = ["Rank", "Trader", "Net worth", "Coins", "Goods value"]
+    rows = []
+    for r in results:
+        vals = [r["rank"], r["name"], r["net_worth"], r["coins"], r["inventory_value"]]
+        rows.append("<tr>" + "".join(f'<td data-label="{h}">{esc(v)}</td>' for h, v in zip(heads, vals)) + "</tr>")
+    return (f'<table class="bb-table"><thead><tr>{"".join(f"<th>{h}</th>" for h in heads)}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>')
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers for round feedback (unit-tested)
+# ---------------------------------------------------------------------------
+
+def my_round_result(summaries: list[dict], player_id: str, starting_coins: int) -> Optional[dict]:
+    """Net-worth change and flags for the player's most recently resolved round."""
+    if not summaries:
+        return None
+    last = summaries[-1]
+    row = next((r for r in last["players"] if r["player_id"] == player_id), None)
+    if row is None:
+        return None
+    before = starting_coins
+    if len(summaries) >= 2:
+        prev = next((r for r in summaries[-2]["players"] if r["player_id"] == player_id), None)
+        before = prev["net_worth"] if prev else starting_coins
+    caught = any(e["kind"] == "tax_paid" and e.get("note") for e in row["effects"])
+    return {"round": last["round"], "event": last["event"], "before": before, "after": row["net_worth"],
+            "delta": row["net_worth"] - before, "auto": bool(row["trade"].get("auto")), "caught_thief": caught}
+
+
+def round_reaction(result: Optional[dict]) -> Optional[str]:
+    """At most one reaction per round, and only for notable moments."""
+    if not result:
+        return None
+    if result["caught_thief"]:
+        return "caught"
+    if result["delta"] >= theme.PROFIT_REACTION_THRESHOLD:
+        return "profit"
+    return None

@@ -56,7 +56,7 @@ def create_game(app_env, db):
 def test_home_renders(app_env):
     at = app_env().run()
     assert not at.exception
-    assert "Bluff Bazaar" in page_text(at)
+    assert "Bluff Bazaar" in page_text(at) and "The Malabar Trade Game" in page_text(at)
     assert [b.label for b in at.button] == ["Create room", "Join room"]
 
 
@@ -68,7 +68,7 @@ def test_join_by_code_via_ui(app_env, db):
     assert at.text_input[1].value == code
     at.text_input[2].input("Guest")
     button(at, "Join room").click().run()
-    assert qp(at, "room") == code and "Players 2/4" in page_text(at)
+    assert qp(at, "room") == code and "Traders 2/4" in page_text(at)
 
 
 def test_full_round_through_ui(app_env, db):
@@ -79,18 +79,19 @@ def test_full_round_through_ui(app_env, db):
     at.button_group(key="act_1").set_value("buy").run()
     at.button_group(key="com_1_buy").set_value("spices").run()
     at.button_group(key="qty_1_buy").set_value(2).run()
-    assert "2 × 10 = <b>20 🪙</b>" in page_text(at)
+    assert "2 × 10 = <b>20 coins</b>" in page_text(at)
     button(at, "🔒 Lock in move").click().run()
     assert not at.exception
-    assert "Locked in" in page_text(at) and "Buy 2 × 🌶️ Spices" in page_text(at)
+    assert "Move accepted" in page_text(at) and "Buy 2 × Thenga" in page_text(at)
 
     for t in bots:
         service.submit_action(db, code, t, 1, rid(), "hold")
     at.run()
     text = page_text(at)
     assert "Round 2/8" in text
-    assert "bought 2 🌶️ Spices @ 10" in text
-    assert "80 🪙" in text  # coins after buying 2 spices at 10
+    assert "bought 2 Thenga @ 10" in text
+    assert '<div class="v">80</div><div class="l">Coins</div>' in text  # bought 2 Thenga at 10
+    assert "Round 1 settled" in text
 
 
 def test_insufficient_funds_blocks_lock_in(app_env, db):
@@ -107,7 +108,7 @@ def test_opponent_moves_not_shown_before_resolution(app_env, db):
     service.submit_action(db, code, bots[0], 1, rid(), "buy", "relics", 3)
     at.run()
     text = page_text(at)
-    assert "1/4 locked" in text
+    assert "1/4 locked in" in text
     assert "bought 3" not in text and "Buy 3" not in text
 
 
@@ -128,7 +129,7 @@ def test_rejoin_from_url_restores_seat(app_env, db):
     fresh.query_params["room"] = code
     fresh.query_params["t"] = bots[1]
     fresh.run()
-    assert "Locked in" in page_text(fresh) and "Hold" in page_text(fresh)
+    assert "Move accepted" in page_text(fresh) and "Hold" in page_text(fresh)
 
 
 def test_final_results_screen(app_env, db):
@@ -140,5 +141,53 @@ def test_final_results_screen(app_env, db):
     assert not at.exception
     text = page_text(at)
     assert "wins the bazaar" in text or "win the bazaar" in text
-    assert "bb-podium" in text
-    assert len(at.dataframe) == 1
+    assert "bb-podium" in text and "bb-table" in text
+    assert "Adipoli! Bazaarile Raja!" in text
+
+
+def test_translation_toggle_persists_in_url(app_env, db):
+    at, code, token, bots = create_game(app_env, db)
+    visible_en = '<div class="bb-en">Coconut</div>'
+    assert visible_en in page_text(at)
+    at.toggle(key="show_en").set_value(False).run()
+    assert not at.exception
+    assert visible_en not in page_text(at) and "Thenga" in page_text(at)
+    assert qp(at, "en") == "0" and qp(at, "room") == code
+    # A fresh browser session opened from the same URL keeps the preference and the seat.
+    fresh = app_env()
+    for k in ("room", "t", "en"):
+        fresh.query_params[k] = qp(at, k)
+    fresh.run()
+    assert visible_en not in page_text(fresh) and "Your secret move" in page_text(fresh)
+
+
+def test_timeout_notice_and_one_toast_per_round(app_env, db):
+    at, code, token, bots = create_game(app_env, db)
+    for t in bots:
+        service.submit_action(db, code, t, 1, rid(), "hold")
+    with db.tx() as conn:
+        conn.execute("update bluff.rooms set round_deadline = now() - interval '1 second' where code = %s", (code,))
+    service.resolve_if_expired(db, code)
+    at.run()
+    text = page_text(at)
+    assert "Round 2/8" in text and "Time ran out last round" in text
+    assert len(at.toast) == 1 and "Round 1 settled" in at.toast[0].value
+    at.run()  # polling rerun: no repeated toast
+    assert len(at.toast) == 0
+
+
+def test_double_down_lock_in_confirms_with_reaction(app_env, db):
+    at, code, token, bots = create_game(app_env, db)
+    from .test_service import give_card
+    give_card(db, code, token, "double_down")
+    at.run()
+    at.button_group(key="act_1").set_value("buy").run()
+    at.button_group(key="com_1_buy").set_value("spices").run()
+    dd = next(o for o in at.radio(key="card_1").options if "Iratti Labham" in o)
+    at.radio(key="card_1").set_value(next(
+        v for v in service.get_view(db, code, token)["me"]["hand"] if v["card_type"] == "double_down")["card_id"]).run()
+    assert dd
+    button(at, "🔒 Lock in move").click().run()
+    assert not at.exception
+    assert any("Risk edukkua alle?" in t.value and "Move accepted" in t.value for t in at.toast)
+    assert "Move accepted" in page_text(at) and "Iratti Labham" in page_text(at)

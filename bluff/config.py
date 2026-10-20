@@ -1,18 +1,13 @@
-"""Static game data and per-room configuration for Bluff Bazaar."""
+"""Static game data and per-room configuration for Bluff Bazaar.
+
+Only ids and rules live here; everything players read is in bluff/theme.py.
+"""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 COMMODITIES: tuple[str, ...] = ("crystals", "spices", "energy", "metals", "relics")
-
-COMMODITY_INFO: dict[str, dict[str, str]] = {
-    "crystals": {"icon": "💎", "label": "Crystals"},
-    "spices": {"icon": "🌶️", "label": "Spices"},
-    "energy": {"icon": "⚡", "label": "Energy"},
-    "metals": {"icon": "⚙️", "label": "Metals"},
-    "relics": {"icon": "🏺", "label": "Relics"},
-}
 
 DEFAULT_STARTING_PRICES: dict[str, int] = {
     "crystals": 20,
@@ -22,30 +17,19 @@ DEFAULT_STARTING_PRICES: dict[str, int] = {
     "relics": 25,
 }
 
-# Card keys and how each card is targeted.
+# Card type ids (stored in the database; never rename).
 CARD_TYPES: tuple[str, ...] = (
     "market_pump", "market_crash", "shield", "insider_tip", "tax_collector", "double_down",
 )
-CARD_INFO: dict[str, dict[str, str]] = {
-    "market_pump": {"icon": "📈", "name": "Market Pump", "target": "commodity",
-                    "text": "Push a commodity's price up by 25% (min +2)."},
-    "market_crash": {"icon": "📉", "name": "Market Crash", "target": "commodity",
-                     "text": "Drag a commodity's price down by 25% (min −2)."},
-    "shield": {"icon": "🛡️", "name": "Shield", "target": "none",
-               "text": "Block Tax Collector and Customs; refund your crash losses."},
-    "insider_tip": {"icon": "🔍", "name": "Insider Tip", "target": "instant",
-                    "text": "Use now: privately reveal this round's true event."},
-    "tax_collector": {"icon": "💰", "name": "Tax Collector", "target": "player",
-                      "text": "Take 15% of an opponent's coins (max 15)."},
-    "double_down": {"icon": "🎲", "name": "Double Down", "target": "none",
-                    "text": "Your trade's price swing is paid — or charged — again."},
+# How each card is targeted (game logic). Display names live in bluff/theme.py.
+CARD_TARGETS: dict[str, str] = {
+    "market_pump": "commodity",
+    "market_crash": "commodity",
+    "shield": "none",
+    "insider_tip": "instant",
+    "tax_collector": "player",
+    "double_down": "none",
 }
-
-GLOBAL_RUMOR = "The bazaar feels oddly quiet…"
-
-
-def commodity_rumor(commodity: str) -> str:
-    return f"Traders are whispering about {COMMODITY_INFO[commodity]['label'].lower()}…"
 
 
 @dataclass(frozen=True)
@@ -122,26 +106,3 @@ def event_keys() -> list[str]:
     for c in COMMODITIES:
         keys += [f"{c}_boom", f"{c}_bust"]
     return keys + ["calm", "festival", "customs"]
-
-
-def event_info(key: str) -> dict[str, str]:
-    """Display info for an event key."""
-    if key == "calm":
-        return {"name": "Calm Day", "icon": "🌤️", "rumor": GLOBAL_RUMOR,
-                "text": "Nothing unusual happens."}
-    if key == "festival":
-        return {"name": "Trade Festival", "icon": "🎉", "rumor": GLOBAL_RUMOR,
-                "text": "Every player whose trade executed earns a bonus."}
-    if key == "customs":
-        return {"name": "Customs Inspection", "icon": "🛃", "rumor": GLOBAL_RUMOR,
-                "text": "Pay 1 coin per unit held above 6. Shield blocks."}
-    commodity, kind = key.rsplit("_", 1)
-    if commodity not in COMMODITIES or kind not in ("boom", "bust"):
-        raise KeyError(key)
-    label = COMMODITY_INFO[commodity]["label"]
-    return {
-        "name": f"{label} {'Boom' if kind == 'boom' else 'Bust'}",
-        "icon": "🚀" if kind == "boom" else "🕳️",
-        "rumor": commodity_rumor(commodity),
-        "text": f"{label} price {'rises' if kind == 'boom' else 'falls'} sharply.",
-    }

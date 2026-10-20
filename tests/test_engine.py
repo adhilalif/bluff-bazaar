@@ -3,7 +3,7 @@ from collections import Counter
 
 import pytest
 
-from bluff.config import CARD_TYPES, COMMODITIES, DEFAULT_STARTING_PRICES, GameConfig, event_info, event_keys
+from bluff.config import CARD_TYPES, COMMODITIES, DEFAULT_STARTING_PRICES, GameConfig, event_keys
 from bluff.engine import (
     CardPlay, InvalidAction, PlayerState, Submission, deal_hands, demand_delta, final_ranking,
     move_price, net_worth, resolve_round, schedule_events, validate_submission,
@@ -57,14 +57,6 @@ class TestConfig:
     def test_exactly_four_players(self):
         with pytest.raises(ValueError):
             GameConfig(num_players=3)
-
-    def test_event_info_for_all_events(self):
-        for key in event_keys():
-            assert event_info(key)["name"]
-
-    def test_boom_and_bust_share_rumor(self):
-        assert event_info("relics_boom")["rumor"] == event_info("relics_bust")["rumor"]
-        assert event_info("calm")["rumor"] == event_info("festival")["rumor"] == event_info("customs")["rumor"]
 
 
 # ---------------------------------------------------------------------- setup

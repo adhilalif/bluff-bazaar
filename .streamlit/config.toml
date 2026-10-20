@@ -1,10 +1,15 @@
 [theme]
-base = "dark"
-primaryColor = "#2dd4bf"
-backgroundColor = "#0b1328"
-secondaryBackgroundColor = "#14203d"
-textColor = "#e8edf7"
-font = "sans serif"
+base = "light"
+# Kasavu ivory background, forest green primary, teak text.
+primaryColor = "#1E4D36"
+backgroundColor = "#FBF7EC"
+secondaryBackgroundColor = "#F2E9D3"
+textColor = "#2E2015"
+linkColor = "#1E4D36"
+borderColor = "#E3D6B6"
+baseRadius = "0.75rem"
+font = "DM Sans:https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap"
+headingFont = "Fraunces:https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&display=swap"
 
 [client]
 toolbarMode = "minimal"

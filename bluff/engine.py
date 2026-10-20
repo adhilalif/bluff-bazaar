@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping, Optional
 
 from .config import CARD_TYPES, COMMODITIES, GameConfig, event_keys
+from .theme import card_name, commodity_name
 
 ACTIONS = ("buy", "sell", "hold")
 SUBMITTABLE_CARDS = tuple(c for c in CARD_TYPES if c != "insider_tip")
@@ -107,7 +108,7 @@ def _check_trade(config: GameConfig, player: PlayerState, prices: Mapping[str, i
                 f"Inventory full: you hold {player.units()}/{config.inventory_limit} units.")
     else:
         if player.held(sub.commodity) < sub.quantity:
-            raise InvalidAction(f"You only hold {player.held(sub.commodity)} {sub.commodity}.")
+            raise InvalidAction(f"You only hold {player.held(sub.commodity)} {commodity_name(sub.commodity)}.")
 
 
 def validate_submission(
@@ -135,7 +136,7 @@ def validate_submission(
     if card.card_type not in list(hand):
         raise InvalidAction("That card is not in your hand.")
     if card.card_type == "insider_tip":
-        raise InvalidAction("Insider Tip is used immediately, not with a trade.")
+        raise InvalidAction(f"{card_name('insider_tip')} is used immediately, not with a trade.")
     if card.card_type in ("market_pump", "market_crash"):
         if card.target_commodity not in COMMODITIES:
             raise InvalidAction("Choose a commodity to target.")
@@ -152,7 +153,7 @@ def validate_submission(
         if card.target_commodity is not None or card.target_player is not None:
             raise InvalidAction("This card takes no target.")
         if card.card_type == "double_down" and sub.action == "hold":
-            raise InvalidAction("Double Down needs a buy or sell.")
+            raise InvalidAction(f"{card_name('double_down')} needs a buy or sell.")
 
 
 # ---------------------------------------------------------------------------

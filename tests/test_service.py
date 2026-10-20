@@ -569,3 +569,33 @@ class TestFullGame:
         assert a["inventory_value"] == sum(inv[c] * final_prices[c] for c in COMMODITIES)
         with pytest.raises(StaleError, match="finished"):
             submit(db, code, tokens[0], 9)
+
+
+# ------------------------------------------------------------------ pulse
+
+class TestPulse:
+    def test_pulse_tracks_locks_without_leaking(self, db, game):
+        code, tokens = game
+        p = service.get_pulse(db, code, tokens[1])
+        assert (p["status"], p["round"], p["submitted"]) == ("active", 1, [])
+        assert p["seconds_left"] > 0 and set(p["online"]) == {1, 2, 3, 4}
+        submit(db, code, tokens[0], action="buy", commodity="relics", quantity=2)
+        p = service.get_pulse(db, code, tokens[1])
+        assert p["submitted"] == [1]
+        assert set(p) == {"status", "round", "version", "seconds_left", "submitted", "online"}
+        assert "relics" not in view_json(p)
+
+    def test_pulse_requires_valid_token(self, db, game):
+        code, _ = game
+        with pytest.raises(AuthError):
+            service.get_pulse(db, code, "forged")
+
+    def test_pulse_sees_round_change_and_offline(self, db, game):
+        code, tokens = game
+        with db.tx() as conn:
+            conn.execute("update bluff.players set last_seen_at = now() - interval '5 minutes' "
+                         "where token_hash = %s", (service.hash_token(tokens[3]),))
+        assert 4 not in service.get_pulse(db, code, tokens[0])["online"]
+        all_hold(db, code, tokens, 1)
+        p = service.get_pulse(db, code, tokens[0])
+        assert p["round"] == 2 and p["submitted"] == []

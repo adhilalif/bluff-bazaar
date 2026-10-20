@@ -22,7 +22,8 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from . import engine
-from .config import CARD_INFO, COMMODITIES, GameConfig, event_info
+from .config import COMMODITIES, GameConfig
+from .theme import rumor_for, rumor_subject
 from .db import Database
 from .engine import CardPlay, InvalidAction, PlayerState, Submission
 
@@ -534,6 +535,35 @@ def get_version(db: Database, code: str) -> Optional[int]:
     return row["version"] if row else None
 
 
+def get_pulse(db: Database, code: str, token: str) -> dict:
+    """Small public status read for the 2-second poll.
+
+    Lets the UI update "locked in" / online markers and the timer in place, and only rerun the
+    whole page when the phase (status or round) changes. Contains no private data.
+    """
+    with db.pool.connection() as conn:
+        room = conn.execute(
+            "select id, status, current_round, version, "
+            "greatest(0, extract(epoch from (round_deadline - now())))::int as secs_left "
+            "from bluff.rooms where code = %s", (normalize_code(code),)).fetchone()
+        if room is None:
+            raise GameError("Room not found. Check the code.")
+        _auth(conn, room, token)
+        rows = conn.execute(
+            "select p.seat, p.last_seen_at > now() - make_interval(secs => %s) as online, "
+            "exists (select 1 from bluff.submissions s where s.player_id = p.id and s.round_no = %s) as submitted "
+            "from bluff.players p where p.room_id = %s order by p.seat",
+            (OFFLINE_AFTER_SECONDS, room["current_round"], room["id"])).fetchall()
+    return {
+        "status": room["status"],
+        "round": room["current_round"],
+        "version": room["version"],
+        "seconds_left": room["secs_left"],
+        "submitted": [r["seat"] for r in rows if r["submitted"]],
+        "online": [r["seat"] for r in rows if r["online"]],
+    }
+
+
 def get_view(db: Database, code: str, token: str) -> dict:
     """Everything one player is allowed to see, and nothing else.
 
@@ -571,7 +601,7 @@ def get_view(db: Database, code: str, token: str) -> dict:
         ]
 
         state = _player_state(conn, me)
-        hand = [{"card_id": str(c["id"]), "card_type": c["card_type"], **CARD_INFO[c["card_type"]]}
+        hand = [{"card_id": str(c["id"]), "card_type": c["card_type"]}
                 for c in conn.execute("select id, card_type from bluff.player_cards where player_id = %s "
                                       "and played_round is null order by card_type, id", (me["id"],))]
         played_now = conn.execute("select card_type from bluff.player_cards where player_id = %s "
@@ -596,7 +626,8 @@ def get_view(db: Database, code: str, token: str) -> dict:
         if room["status"] == "active":
             ev = conn.execute("select event_key from bluff.round_events where room_id = %s and round_no = %s",
                               (room["id"], r)).fetchone()
-            current = {"round": r, "rumor": event_info(ev["event_key"])["rumor"],
+            current = {"round": r, "rumor": rumor_for(ev["event_key"]),
+                       "rumor_subject": rumor_subject(ev["event_key"]),
                        "seconds_left": now_info["secs_left"], "submitted_count": len(submitted)}
 
         results = [
