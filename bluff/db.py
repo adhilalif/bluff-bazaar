@@ -75,7 +75,15 @@ class Database:
 def apply_migrations(dsn: str) -> list[str]:
     """Apply migrations/*.sql in order, recording each in bluff.schema_migrations."""
     applied: list[str] = []
+    files = sorted(MIGRATIONS_DIR.glob("*.sql"))
     with psycopg.connect(dsn, autocommit=True) as conn:
+        try:  # read-only check first, so a least-privilege role never needs DDL rights
+            with conn.transaction():
+                done = {r[0] for r in conn.execute("select filename from bluff.schema_migrations")}
+            if {p.name for p in files} <= done:
+                return applied
+        except psycopg.errors.UndefinedTable:
+            pass
         conn.execute("create schema if not exists bluff")
         conn.execute("create table if not exists bluff.schema_migrations "
                      "(filename text primary key, applied_at timestamptz not null default now())")

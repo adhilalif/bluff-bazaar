@@ -390,8 +390,11 @@ class TestSecrets:
             rows = conn.execute("select relname, relrowsecurity from pg_class c join pg_namespace n "
                                 "on n.oid = c.relnamespace where n.nspname = 'bluff' and c.relkind = 'r'").fetchall()
             assert rows and all(r["relrowsecurity"] for r in rows)
-            policies = conn.execute("select count(*) n from pg_policies where schemaname = 'bluff'").fetchone()["n"]
-            assert policies == 0
+            # No policy may open anything to the Supabase API roles (an optional bluff_app policy is fine).
+            exposed = conn.execute(
+                "select count(*) n from pg_policies where schemaname = 'bluff' "
+                "and roles && array['anon', 'authenticated', 'public']::name[]").fetchone()["n"]
+            assert exposed == 0
 
     def test_database_rejects_negative_coins(self, db, game):
         with pytest.raises(psycopg.errors.CheckViolation):
