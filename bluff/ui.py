@@ -131,7 +131,7 @@ label:has(input:focus-visible) { outline: 3px solid var(--bb-gold) !important; o
 .dot.on { background: var(--bb-up); } .dot.off { background: #A39580; }
 
 /* Live lock strip (updated in place by the poll fragment). */
-.bb-strip { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:.35rem; margin:.35rem 0 .2rem; }
+.bb-strip { display:grid; grid-template-columns: repeat(var(--bb-seats, 4), minmax(0, 1fr)); gap:.35rem; margin:.35rem 0 .2rem; }
 .bb-seat { border:1px solid var(--bb-line); border-radius: 10px; padding:.3rem .35rem; text-align:center; font-size:.8rem;
   background: var(--bb-card); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .bb-seat.done { background: var(--bb-green-soft); border-color: #B9D2BF; color: var(--bb-green); font-weight: 700; }
@@ -278,7 +278,8 @@ def lock_strip_html(players: list[dict], submitted: list[int], online: list[int]
         cls = "bb-seat" + (" done" if done else "") + (" me" if p["is_me"] else "")
         label = "You" if p["is_me"] else p["name"]
         cells.append(f'<div class="{cls}">{esc(label)} {mark}</div>')
-    return f'<div class="bb-strip" role="status" aria-live="polite">{"".join(cells)}</div>'
+    return (f'<div class="bb-strip" style="--bb-seats:{len(players)}" role="status" aria-live="polite">'
+            f'{"".join(cells)}</div>')
 
 
 def progress_html(fraction: float) -> str:

@@ -42,7 +42,7 @@ double_down 3602, insider_tip 2314, market_crash 3960, market_pump 4142, shield 
 
 ## 2. Balance A/B tests (Classic rules, matched seeds) — not applied
 
-**Lower demand impact** (`demand_divisor=3, demand_cap=3`), 3000 matched-seed games
+**Lower demand impact** (`demand_divisor=3, demand_cap=3`), 3000 matched-seed games, 4 players, classic rules
 
 | Strategy | Mean A | Mean B | Δ | Win A | Win B |
 |---|---|---|---|---|---|
@@ -52,9 +52,10 @@ double_down 3602, insider_tip 2314, market_crash 3960, market_pump 4142, shield 
 | pump | 173.9 | 159.3 | -8.4% | 44.6% | 43.4% |
 | insider | 172.1 | 159.3 | -7.4% | 43.5% | 42.3% |
 
+Mean cargo value per player A +0.0 → B +0.0
 Gap A 82.5 → B 69.1; comeback A 0.3% → B 0.9%; tie A 6.3% → B 8.2%
 
-**Lower maximum swing** (`max_swing_pct=30`), 3000 matched-seed games
+**Lower maximum swing** (`max_swing_pct=30`), 3000 matched-seed games, 4 players, classic rules
 
 | Strategy | Mean A | Mean B | Δ | Win A | Win B |
 |---|---|---|---|---|---|
@@ -64,9 +65,10 @@ Gap A 82.5 → B 69.1; comeback A 0.3% → B 0.9%; tie A 6.3% → B 8.2%
 | pump | 173.9 | 165.0 | -5.1% | 44.6% | 46.4% |
 | insider | 172.1 | 162.8 | -5.4% | 43.5% | 41.4% |
 
+Mean cargo value per player A +0.0 → B +0.0
 Gap A 82.5 → B 73.7; comeback A 0.3% → B 0.4%; tie A 6.3% → B 6.7%
 
-**Lower card movement** (`card_move_pct=20`), 3000 matched-seed games
+**Lower card movement** (`card_move_pct=20`), 3000 matched-seed games, 4 players, classic rules
 
 | Strategy | Mean A | Mean B | Δ | Win A | Win B |
 |---|---|---|---|---|---|
@@ -76,6 +78,7 @@ Gap A 82.5 → B 73.7; comeback A 0.3% → B 0.4%; tie A 6.3% → B 6.7%
 | pump | 173.9 | 172.0 | -1.1% | 44.6% | 44.5% |
 | insider | 172.1 | 170.9 | -0.7% | 43.5% | 44.0% |
 
+Mean cargo value per player A +0.0 → B +0.0
 Gap A 82.5 → B 80.7; comeback A 0.3% → B 0.2%; tie A 6.3% → B 6.0%
 
 ## 3. Insider Tip controlled test
@@ -129,3 +132,51 @@ cardamom_connoisseur 32%, cash_chest 3%, coconut_king 23%, fruit_stall 19%, full
 
 Seat win rates (1–4): 26.1% / 25.0% / 24.8% / 24.1% · tie rate 0.3% · mean first–last gap 102.9 · comeback rate 0.3% · illegal bot moves 4 · invariant errors 0
 
+## 5. Player counts (2, 3, 4)
+
+Same strategies and seeds; with N seats, line-ups cycle through every N-strategy subset of random/trend/pump/insider/order in every seat rotation. Win rate = share of the games a strategy played that it won (ties split). Volatility = mean absolute % price change per commodity per round.
+
+### Full rules
+
+| Players | Games | Tie rate | Seat win rates | Gap | Comeback | Volatility | Cards/player | Best strategy (win) | Worst strategy (win) |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | 3000 | 0.1% | 49% / 51% | 45.9 | 18.3% | 5.95% | 2.29 | insider (63%) | random (14%) |
+| 3 | 3000 | 0.5% | 33% / 34% / 33% | 70.0 | 6.3% | 7.08% | 2.28 | pump (44%) | random (3%) |
+| 4 | 3000 | 0.2% | 26% / 25% / 24% / 25% | 89.2 | 2.2% | 8.05% | 2.28 | insider (36%) | random (1%) |
+
+### Classic rules
+
+| Players | Games | Tie rate | Seat win rates | Gap | Comeback | Volatility | Cards/player | Best strategy (win) | Worst strategy (win) |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | 3000 | 5.9% | 49% / 51% | 25.2 | 17.4% | 6.47% | 2.33 | insider (64%) | random (16%) |
+| 3 | 3000 | 7.0% | 32% / 34% / 34% | 53.1 | 3.1% | 7.88% | 2.34 | pump (48%) | random (2%) |
+| 4 | 3000 | 6.0% | 26% / 25% / 25% / 25% | 81.2 | 0.5% | 8.83% | 2.35 | pump (36%) | random (0%) |
+
+### Mirror matches (every seat = trend bot), Full Bazaar
+
+| Players | Mean net worth | Median | Price moves | Cards & events | Cargo | Spoiled | Volatility |
+|---|---|---|---|---|---|---|---|
+| 2 | 172.5 | 171.0 | +40.8 | +4.3 | +21.9 | -0.1 | 6.80% |
+| 3 | 181.4 | 179.0 | +55.9 | +5.7 | +15.1 | -0.1 | 8.09% |
+| 4 | 185.9 | 183.0 | +64.7 | +6.3 | +10.8 | -0.1 | 8.86% |
+
+### Chungam (Tax Collector) by player count, Full Bazaar mixed matches
+
+| Players | Plays per game | Mean cards & events per player |
+|---|---|---|
+| 2 | 0.92 | +2.9 |
+| 3 | 1.38 | +3.9 |
+| 4 | 1.84 | +4.4 |
+
+
+
+### Player-count notes
+
+- **Measured:** no seat advantage at any count; smaller games are closer (higher comeback rate, smaller
+  first–last gap) and calmer (lower volatility), because fewer traders create less total demand.
+- **Measured:** cargo lots are cheaper with fewer bidders (trend mirror: +21.9 per player at 2 players vs
+  +10.8 at 4). A matched-seed A/B with `lot_reserve_pct=65` at 2 players only reduced this to +13.4 with
+  negligible effect on outcomes — **not applied**; candidate for human playtesting.
+- **Hypothesis (not isolated):** the insider bot's high 2-player win rate reflects head-to-head pairings
+  against weaker bots, not the card itself (the controlled 4-player test in §3 found the tip worth ~+2).
+- No rules were changed for 2- or 3-player games: same scoring, cards, events and market formula.

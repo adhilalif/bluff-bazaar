@@ -54,9 +54,11 @@ class TestConfig:
         with pytest.raises(ValueError):
             GameConfig(starting_prices={"crystals": 10})
 
-    def test_exactly_four_players(self):
-        with pytest.raises(ValueError):
-            GameConfig(num_players=3)
+    def test_two_to_four_players(self):
+        assert [GameConfig(num_players=n).num_players for n in (2, 3, 4)] == [2, 3, 4]
+        for bad in (1, 5):
+            with pytest.raises(ValueError):
+                GameConfig(num_players=bad)
 
 
 # ---------------------------------------------------------------------- setup

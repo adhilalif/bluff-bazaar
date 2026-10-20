@@ -261,6 +261,7 @@ def test_layout_fits_and_touch_targets(server, browser, db, device):
     page = new_page(browser, device)
     page.goto(server)
     wait_text(page, "The Malabar Trade Game")
+    page.locator("input").first.wait_for()  # Streamlit renders the form after the header
     assert no_horizontal_overflow(page), "home page scrolls horizontally"
     font = page.evaluate("getComputedStyle(document.querySelector('input')).fontSize")
     assert float(font.rstrip("px")) >= 16, "inputs under 16px make iOS Safari zoom"
@@ -306,3 +307,81 @@ def test_keyboard_focus_is_visible(server, browser):
             assert info["outline"] or info["shadow"], info
             return
     pytest.fail(f"never reached the Create room button by keyboard: {seen}")
+
+
+def pick_mode(page, label):
+    page.locator('[data-testid="stButtonGroup"] button', has_text=label).first.click()
+    wait_idle(page)
+
+
+def test_two_player_game_on_phone_and_tablet(server, browser):
+    a = new_page(browser, "iphone-13")
+    b = new_page(browser, "ipad-portrait")
+    a.goto(server)
+    wait_text(a, "How do you want to play?")
+    pick_mode(a, "2 Players")
+    wait_text(a, "Head-to-Head")
+    a.get_by_label("Your name").first.fill("Ammu")
+    a.get_by_role("button", name="Create room").click()
+    wait_text(a, "ROOM CODE")
+    code = re.search(r"room=([A-Z0-9]{6})", a.url).group(1)
+    join_room(b, server, code, "Biju")
+    wait_text(a, "Traders 2/2")
+    for page in (a, b):
+        wait_idle(page)
+        page.get_by_role("button", name="I'm ready").first.click()
+    for page in (a, b):
+        wait_text(page, "2 Players · Full Bazaar")
+        assert page.locator(".bb-strip .bb-seat").count() == 2
+    for rnd in range(1, 9):
+        for page in (a, b):
+            wait_text(page, f"Round {rnd}/8")
+            lock_in(page)
+        if rnd < 8:
+            for page in (a, b):
+                wait_text(page, f"Round {rnd + 1}/8")
+    winners = set()
+    for page in (a, b):
+        wait_text(page, "the bazaar!", timeout=30000)
+        winners.add(page.locator(".bb-winner").inner_text())
+        assert no_horizontal_overflow(page)
+    assert len(winners) == 1
+
+
+@pytest.mark.parametrize("device", ["iphone-13-mini", "iphone-13", "ipad-portrait", "desktop"])
+def test_tutorial_in_browser(server, browser, device):
+    page = new_page(browser, device)
+    page.goto(server)
+    wait_text(page, "How do you want to play?")
+    pick_mode(page, "Tutorial")
+    page.get_by_role("button", name="Start the tutorial").click()
+    wait_text(page, "Lesson 1/")
+    for k in (2, 3):
+        page.get_by_role("button", name="Next lesson").click()
+        wait_text(page, f"Lesson {k}/")  # wait for the re-render before the next click
+    wait_text(page, "Your task:")
+    # Play the buy lesson for real: Buy -> Thenga (default) -> 2.
+    segmented(page, "Buy").click()
+    wait_text(page, "Quantity")
+    segmented(page, "2").click()
+    wait_idle(page)
+    assert no_horizontal_overflow(page) and not hidden_scrollers(page)
+    assert not small_touch_targets(page), small_touch_targets(page)
+    page.get_by_role("button", name="Lock in move").click()
+    wait_text(page, "What happened")
+    shot(page, f"tutorial-{device}")
+    # Skip the rest and finish.
+    for _ in range(12):
+        if page.get_by_text("Tutorial complete").count():
+            break
+        before = page.locator(".bb-chip", has_text="Lesson").inner_text()
+        has_result = page.get_by_text("What happened").count() > 0
+        btn = page.get_by_role("button", name="Next lesson")
+        (btn if btn.count() else page.get_by_role("button", name="Skip lesson")).first.click()
+        page.wait_for_function(
+            "([b, r]) => { const c = [...document.querySelectorAll('.bb-chip')].find(e => e.innerText.startsWith('Lesson'));"
+            " return !c || c.innerText !== b || (r && !document.body.innerText.includes('What happened')); }",
+            arg=[before, has_result], timeout=20000)
+    wait_text(page, "Tutorial complete")
+    page.get_by_role("button", name="Finish and go to the bazaar").click()
+    wait_text(page, "How do you want to play?")

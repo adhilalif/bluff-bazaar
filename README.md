@@ -4,7 +4,9 @@ A four-player online market-bluffing game built with **Python + Streamlit + Supa
 Kerala's historic Malabar spice-trade harbours. Eight rounds, 15–25 minutes. Read the rumor, trade in secret,
 play sneaky cards, and finish with the highest net worth.
 
-* Exactly 4 players per room, joined with a six-character room code
+* Start screen modes: **Tutorial — Learn the Bazaar** (one player, guided, nothing saved),
+  **2 Players — Head-to-Head**, **3 Players — Three-Way Bazaar**, **4 Players — Full Table**
+* Rooms are joined with a six-character room code
 * 5 goods — Thenga (coconut), Kurumulaku (black pepper), Elakka (cardamom), Chakka (jackfruit),
   Nendran (Kerala banana) — with configurable starting prices, bounded price movement, 10-unit inventory limit
 * 6 cards: 📈 Vila Keri!, 📉 Vila Idinju!, 🛡️ Raksha, 🔍 Oru Karyam Parayam…, 💰 Chungam, 🎲 Iratti Labham
@@ -31,6 +33,7 @@ bluff/service.py            Trusted server-side operations (auth, locking, valid
 bluff/db.py                 Connection pool, transactions, migration runner
 bluff/ui.py                 Kerala CSS theme + HTML snippets (all user text escaped)
 bluff/sim/                  Heuristic bots + game runner + metrics (real engine, no database)
+bluff/tutorial.py           Guided single-player lessons on the real engine (no database)
 scripts/simulate.py         Balance report / matched-seed A/B tests
 docs/SIMULATION_REPORT.md   Latest generated simulation report
 migrations/001_init.sql     Schema (idempotent)
@@ -109,12 +112,14 @@ python -m pytest
 | Suite | Count | Covers |
 |---|---|---|
 | `tests/test_rules_full.py` | 33 | Full Bazaar: auction (reserve, ties, fresh cargo), spoilage, monsoon effects, orders, Classic unchanged, breakdown reconciles, randomised never-negative test |
+| `tests/test_tutorial.py` | 10 | tutorial completes, every taught move is legal, explanations match engine output, hints, skip/restart, never touches the database |
+| `tests/test_player_counts.py` | 16 | dealing, resolution, Chungam with one opponent, invalid targets, cargo ties and full deterministic games at 2/3/4 players |
 | `tests/test_sim.py` | 4 | simulator determinism, balanced line-ups, no invariant errors, sources reconcile |
 | `tests/test_engine.py` | 59 | every rule: validation, funds, inventory, price bounds (incl. fuzz), each card, events, ordering, scoring, ties, a full scripted game |
 | `tests/test_theme.py` | 22 | every id has display text, requested names/titles, rumors stay ambiguous, ids/prices unchanged, icons valid, escaping, reactions logic |
-| `tests/test_service.py` | 71 | lobby, auth, idempotency, duplicate & concurrent submissions, stale rounds, invalid trades, secret isolation, RLS, timeouts, disconnect/rejoin, inactivity, live-status pulse, full 8-round game |
-| `tests/test_app.py` | 15 | the real `app.py` via Streamlit `AppTest`: create/join, a full round, funds check, hidden opponent moves, stale links, rejoin, translation toggle, timeout notice, one toast per round, final screen |
-| `tests/e2e/` (opt-in) | 10 | real Chromium against a running server: 4 simultaneous browser sessions play a full game (double-tap, reconnect, secrecy, selections surviving polls); no horizontal overflow, no hidden sideways scrollers, ≥44 px touch targets and no mid-word wrapping on iPhone 13 mini / 13 / 17 Pro Max (portrait + landscape), iPad (both orientations) and desktop; 16 px inputs; visible keyboard focus |
+| `tests/test_service.py` | 83 | lobby, auth, idempotency, duplicate & concurrent submissions, stale rounds, invalid trades, secret isolation, RLS, timeouts, disconnect/rejoin, inactivity, live-status pulse, full 8-round game |
+| `tests/test_app.py` | 19 | the real `app.py` via Streamlit `AppTest`: create/join, a full round, funds check, hidden opponent moves, stale links, rejoin, translation toggle, timeout notice, one toast per round, final screen |
+| `tests/e2e/` (opt-in) | 15 | real Chromium against a running server: 4 simultaneous browser sessions play a full game (double-tap, reconnect, secrecy, selections surviving polls); no horizontal overflow, no hidden sideways scrollers, ≥44 px touch targets and no mid-word wrapping on iPhone 13 mini / 13 / 17 Pro Max (portrait + landscape), iPad (both orientations) and desktop; 16 px inputs; visible keyboard focus |
 
 Browser tests (slow; need Playwright and a Chromium):
 
@@ -159,11 +164,25 @@ The integration and UI suites pass when run as this role.
 ```bash
 python scripts/simulate.py report --games 3000 > docs/SIMULATION_REPORT.md   # ~2 minutes
 python scripts/simulate.py ab --set demand_divisor=3 --set demand_cap=3       # one matched-seed A/B test
+python scripts/simulate.py counts                                            # 2/3/4-player comparison
+python scripts/simulate.py ab --players 2 --rules full --set lot_reserve_pct=65
 ```
 
 Bots (`bluff/sim/bots.py`) only see what a player sees and play through the real engine. They are a
 diagnostic, not a substitute for playtesting. Price-movement defaults are unchanged; candidate tweaks and
 their measured effect are in `docs/SIMULATION_REPORT.md` §2.
+
+## Player modes
+
+- **Tutorial — Learn the Bazaar:** one player plus two scripted guides. Eight short lessons (goal, rumors,
+  buying, selling, a card, Insider Tip, cargo auction, final scoring). Every hands-on lesson is resolved by the
+  real engine with a scripted event, and the explanation is computed from that result. Progress bar, hints,
+  Skip (auto-plays the taught move so later lessons stay legal), Restart and Exit. The tutorial lives only in
+  the browser session: it needs no other players, works even without the database, and is never stored.
+  Refreshing the page restarts it. A full solo match against bots is **not** implemented (deferred).
+- **2 / 3 / 4 players:** the host picks the count; the room fills, readies and starts at exactly that many
+  humans. No dummy seats, cash or hidden market actions; scoring, cards, events and the market formula are
+  identical at every count. Chungam can target any existing opponent (with 2 players, the only one).
 
 ## Theme and display strings
 

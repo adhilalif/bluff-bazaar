@@ -242,3 +242,95 @@ def test_final_screen_reveals_orders(app_env, db):
     at.run()
     text = page_text(at)
     assert "Secret order" in text and 'data-label="Bonus"' in text
+
+
+# ------------------------------------------------------------ player modes + tutorial
+
+def start_tutorial(app_env):
+    at = app_env().run()
+    at.button_group(key="home_mode").set_value("tutorial").run()
+    button(at, "🎓 Start the tutorial").click().run()
+    assert not at.exception and "Lesson 1/" in page_text(at)
+    return at
+
+
+def play_lesson_via_ui(at):
+    """Drive the widgets to the move the current lesson teaches, then lock in."""
+    from bluff import tutorial
+    state = at.session_state["tutorial"]
+    lesson, step = state.lesson, state.step
+    if lesson.needs_tip:
+        button(at, "🔍 Use").click().run()
+    sub = lesson.expected(state)
+    at.button_group(key=f"tut_act_{step}").set_value(sub.action).run()
+    if sub.action != "hold":
+        at.button_group(key=f"tut_com_{step}_{sub.action}").set_value(sub.commodity).run()
+        at.button_group(key=f"tut_qty_{step}_{sub.action}").set_value(sub.quantity).run()
+    if sub.card:
+        at.radio(key=f"tut_card_{step}").set_value(sub.card.card_type).run()
+        at.button_group(key=f"tut_tc_{step}").set_value(sub.card.target_commodity).run()
+    if sub.bid:
+        at.number_input(key=f"tut_bid_{step}").set_value(sub.bid).run()
+    button(at, "🔒 Lock in move").click().run()
+    assert not at.exception
+    assert "What happened" in page_text(at), [w.value for w in at.warning]
+
+
+def test_tutorial_completes_through_the_ui(app_env):
+    at = start_tutorial(app_env)
+    for _ in range(20):
+        state = at.session_state["tutorial"]
+        if state.lesson.key == "score":
+            break
+        if state.lesson.kind == "act":
+            play_lesson_via_ui(at)
+        button(at, "Next lesson").click().run()
+    assert any("Tutorial complete" in s.value for s in at.success) and "bb-table" in page_text(at)
+    assert at.session_state["tutorial"].skipped == []  # every lesson was actually played
+    button(at, "⛵ Finish").click().run()
+    assert "tutorial" not in at.session_state and at.button_group(key="home_mode")
+
+
+def test_tutorial_wrong_move_shows_hint(app_env):
+    at = start_tutorial(app_env)
+    button(at, "Next lesson").click().run()
+    button(at, "Next lesson").click().run()  # buy lesson
+    button(at, "🔒 Lock in move").click().run()  # still "hold"
+    assert any("asks you to" in w.value for w in at.warning)
+    assert at.session_state["tutorial"].outcome is None
+
+
+def test_tutorial_skip_restart_exit(app_env, db):
+    at = start_tutorial(app_env)
+    for _ in range(3):
+        button(at, "Skip lesson").click().run()
+    assert at.session_state["tutorial"].step == 3
+    button(at, "Restart").click().run()
+    assert at.session_state["tutorial"].step == 0 and "Lesson 1/" in page_text(at)
+    button(at, "Exit tutorial").click().run()
+    assert "tutorial" not in at.session_state
+    with db.tx() as conn:  # nothing about the tutorial was stored
+        assert conn.execute("select count(*) n from bluff.rooms").fetchone()["n"] == 0
+
+
+def test_two_player_room_from_start_screen(app_env, db):
+    at = app_env().run()
+    at.button_group(key="home_mode").set_value("2").run()
+    assert "Head-to-Head" in page_text(at)
+    at.text_input[0].input("Ada")
+    button(at, "Create room").click().run()
+    code, token = qp(at, "room"), qp(at, "t")
+    text = page_text(at)
+    assert "Traders 1/2" in text and "2 Players — Head-to-Head" in text
+    bo = service.join_room(db, code, "Bo")
+    with pytest.raises(service.GameError, match="full"):
+        service.join_room(db, code, "Cy")
+    service.set_ready(db, code, bo, True)
+    at.run()
+    button(at, "✅ I'm ready").click().run()
+    text = page_text(at)
+    assert "0/2 locked in" in text and "2 Players · Full Bazaar" in text
+    button(at, "🔒 Lock in move").click().run()
+    service.submit_action(db, code, bo, 1, rid(), "hold")
+    at.run()
+    assert "Round 2/8" in page_text(at)

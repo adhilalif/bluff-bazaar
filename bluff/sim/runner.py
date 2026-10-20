@@ -26,18 +26,19 @@ class GameResult:
     worth_by_round: list[list[int]]       # [round][seat] public net worth after each round
     prices_by_round: list[dict[str, int]]
     card_plays: list[tuple[int, str, str]] = field(default_factory=list)  # (round, strategy, card)
-    lots_won: list[int] = field(default_factory=lambda: [0, 0, 0, 0])
-    orders: list[Optional[str]] = field(default_factory=lambda: [None] * 4)
+    lots_won: list[int] = field(default_factory=list)
+    orders: list[Optional[str]] = field(default_factory=list)
     illegal: int = 0
     invariant_errors: list[str] = field(default_factory=list)
     # Sum over rounds of each seat's net-worth sources (engine breakdown).
-    sources: list[dict[str, int]] = field(default_factory=lambda: [
-        {"price_moves": 0, "cards_events": 0, "cargo": 0, "spoiled": 0} for _ in range(4)])
+    sources: list[dict[str, int]] = field(default_factory=list)
 
 
 def play_game(config: GameConfig, seed: int, bots: list[BotFactory], insider_mode: str = "full") -> GameResult:
     """insider_mode: 'full' (reveal event), 'partial' (good/bad news only), 'off' (card does nothing)."""
-    ids = [f"s{i}" for i in range(1, 5)]
+    if len(bots) != config.num_players:
+        raise ValueError(f"need {config.num_players} bots, got {len(bots)}")
+    ids = [f"s{i}" for i in range(1, config.num_players + 1)]
     players = [PlayerState(pid, i + 1, pid, config.starting_coins, {c: 0 for c in COMMODITIES})
                for i, pid in enumerate(ids)]
     agents = [make(random.Random(f"bot:{seed}:{i}")) for i, make in enumerate(bots)]
@@ -47,7 +48,8 @@ def play_game(config: GameConfig, seed: int, bots: list[BotFactory], insider_mod
     prices = dict(config.starting_prices)
     history = [dict(prices)]
     public_worth = {pid: config.starting_coins for pid in ids}
-    result = GameResult(seed, [a.name for a in agents], [], [], [], orders=[orders.get(pid) for pid in ids])
+    result = GameResult(seed, [a.name for a in agents], [], [], [], orders=[orders.get(pid) for pid in ids],
+                        sources=[{"price_moves": 0, "cards_events": 0, "cargo": 0, "spoiled": 0} for _ in ids])
     lots_won = {pid: 0 for pid in ids}
 
     for r in range(1, config.num_rounds + 1):
@@ -110,13 +112,13 @@ def play_game(config: GameConfig, seed: int, bots: list[BotFactory], insider_mod
 # Match schedules
 # ---------------------------------------------------------------------------
 
-def mixed_schedule(names: list[str], games: int) -> list[list[str]]:
-    """Every 4-strategy subset in every seat rotation, cycled. Each strategy appears in equal numbers."""
-    combos = list(itertools.combinations(names, 4)) if len(names) > 4 else [tuple(names)]
+def mixed_schedule(names: list[str], games: int, seats: int = 4) -> list[list[str]]:
+    """Every `seats`-strategy subset in every seat rotation, cycled. Each strategy appears equally often."""
+    combos = list(itertools.combinations(names, seats)) if len(names) > seats else [tuple(names)]
     lineups = []
     for i in range(games):
         combo = list(combos[i % len(combos)])
-        shift = (i // len(combos)) % 4
+        shift = (i // len(combos)) % seats
         lineups.append(combo[shift:] + combo[:shift])
     return lineups
 
@@ -133,7 +135,9 @@ def run(config: GameConfig, lineups: list[list[str]], factories: dict[str, BotFa
 
 def summarize(results: list[GameResult]) -> dict:
     by_strategy: dict[str, dict[str, list]] = {}
-    seat_wins = [0.0] * 4
+    n_seats = len(results[0].strategies)
+    seat_wins = [0.0] * n_seats
+    volatility = []
     gaps, comebacks, ties = [], 0, 0
     illegal = sum(r.illegal for r in results)
     errors = [e for r in results for e in r.invariant_errors]
@@ -149,7 +153,12 @@ def summarize(results: list[GameResult]) -> dict:
         nws = [row["net_worth"] for row in res.ranking]
         gaps.append(max(nws) - min(nws))
         mid = res.worth_by_round[len(res.worth_by_round) // 2 - 1]
-        last_mid = min(range(4), key=lambda i: mid[i])
+        last_mid = min(range(n_seats), key=lambda i: mid[i])
+        prev = None
+        for prices in res.prices_by_round:
+            if prev:
+                volatility.append(statistics.fmean(abs(prices[c] - prev[c]) / prev[c] for c in COMMODITIES))
+            prev = prices
         if ranks[last_mid + 1]["rank"] == 1:
             comebacks += 1
         for seat, name in enumerate(res.strategies, start=1):
@@ -186,6 +195,7 @@ def summarize(results: list[GameResult]) -> dict:
     return {
         "games": n, "strategies": table, "seat_win_rate": [w / n for w in seat_wins], "tie_rate": ties / n,
         "mean_gap": statistics.fmean(gaps), "comeback_rate": comebacks / n, "illegal_moves": illegal,
+        "volatility": statistics.fmean(volatility) if volatility else 0.0,
         "invariant_errors": errors, "card_plays": card_counts,
         "order_success": {k: sum(v) / len(v) for k, v in sorted(order_hits.items())},
     }

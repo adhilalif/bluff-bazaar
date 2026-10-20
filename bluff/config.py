@@ -33,6 +33,7 @@ CARD_TARGETS: dict[str, str] = {
 
 
 RULE_MODES: tuple[str, ...] = ("full", "classic")
+MIN_PLAYERS, MAX_PLAYERS = 2, 4
 
 # Monsoon season effects (one is drawn per game). Display text lives in bluff/theme.py.
 SEASON_KEYS: tuple[str, ...] = ("ship_delay", "godown_lock", "wet_godowns")
@@ -97,8 +98,8 @@ class GameConfig:
             raise ValueError(f"rules must be one of {RULE_MODES}")
         if not set(self.perishables) <= set(COMMODITIES):
             raise ValueError("perishables must be commodity ids")
-        if self.num_players != 4:
-            raise ValueError("Bluff Bazaar MVP requires exactly 4 players")
+        if not MIN_PLAYERS <= self.num_players <= MAX_PLAYERS:
+            raise ValueError(f"Bluff Bazaar supports {MIN_PLAYERS}–{MAX_PLAYERS} players")
         if self.num_rounds < 1:
             raise ValueError("num_rounds must be >= 1")
         if set(self.starting_prices) != set(COMMODITIES):

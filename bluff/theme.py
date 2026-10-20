@@ -231,3 +231,22 @@ def season_label(key: Optional[str], english: bool = False) -> str:
         return ""
     d = SEASON_DISPLAY[key]
     return f"🌧️ {d['title']}" + (f" ({d['en']})" if english else "")
+
+
+# ---------------------------------------------------------------------------
+# Player modes (start screen)
+# ---------------------------------------------------------------------------
+PLAYER_MODES: dict[str, dict[str, str]] = {
+    "tutorial": {"name": "Tutorial — Learn the Bazaar", "short": "Tutorial",
+                 "text": "One player. A short guided lesson with two guide traders; nothing is saved."},
+    "2": {"name": "2 Players — Head-to-Head", "short": "2 Players",
+          "text": "A duel: every bluff is aimed at one opponent."},
+    "3": {"name": "3 Players — Three-Way Bazaar", "short": "3 Players",
+          "text": "Three traders, shifting alliances."},
+    "4": {"name": "4 Players — Full Table", "short": "4 Players",
+          "text": "The original full table of four traders."},
+}
+
+
+def player_mode_name(num_players: int) -> str:
+    return PLAYER_MODES[str(num_players)]["name"]

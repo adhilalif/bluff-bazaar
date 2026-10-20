@@ -17,7 +17,7 @@ import psycopg
 import streamlit as st
 from psycopg_pool import PoolTimeout
 
-from bluff import service, theme, ui
+from bluff import service, theme, tutorial, ui
 from bluff.config import CARD_TARGETS, DEFAULT_STARTING_PRICES, GameConfig
 from bluff.db import Database, apply_migrations, resolve_database_url
 from bluff.engine import CardPlay, InvalidAction, PlayerState, RoundRules, Submission, validate_submission
@@ -90,7 +90,7 @@ def settings_menu() -> None:
 
 
 def header(big: bool = False) -> None:
-    left, right = st.columns([5, 1], vertical_alignment="center")
+    left, right = st.columns([3, 1], vertical_alignment="center")  # wide enough for the Display label
     with left:
         st.markdown(ui.brand_html(big=big), unsafe_allow_html=True)
     with right:
@@ -119,7 +119,7 @@ def enter_room(code: str, token: str) -> None:
 
 
 def exit_room() -> None:
-    for key in ("code", "token", "last_touch", "seen_round", "celebrated", "flash"):
+    for key in ("code", "token", "last_touch", "seen_round", "celebrated", "flash", "tutorial"):
         ss.pop(key, None)
     prefs = _pref_params()
     st.query_params.clear()
@@ -167,50 +167,64 @@ def home(db: Database) -> None:
     st.markdown('<div class="bb-intro">Trade Thenga, Kurumulaku and Elakka on the old Malabar coast. '
                 'Read the rumors, keep your moves secret, and finish richest.</div>', unsafe_allow_html=True)
     join_code = service.normalize_code(st.query_params.get("join", ""))
-    if join_code:
-        st.info(f"Invited to room **{join_code}** — open the *Join room* tab.")
-    create_tab, join_tab = st.tabs(["⛵ Create room", "🔑 Join room"])
-    with create_tab:
-        with st.form("create"):
-            name = st.text_input("Your name", max_chars=20, placeholder="e.g. Kunjali")
-            labels = list(theme.MARKET_PRESETS)
-            preset = st.selectbox("Market", labels)
-            st.caption("Sets the five starting prices. Classic Kadavu is the balanced default.")
-            timer = st.select_slider("Turn timer", options=[45, 60, 90, 120, 180], value=90,
-                                     format_func=lambda s: f"{s} s")
-            mode = st.radio("Rules", list(theme.RULE_MODE_DISPLAY), horizontal=True,
-                            format_func=lambda m: theme.RULE_MODE_DISPLAY[m]["name"]
-                            + (" (recommended)" if m == "full" else ""))
-            st.caption(theme.RULE_MODE_DISPLAY[mode]["text"])
-            if st.form_submit_button("Create room", type="primary", use_container_width=True):
-                try:
-                    prices = PRESETS[theme.MARKET_PRESETS[preset]]
-                    cfg = GameConfig(starting_prices=dict(prices), turn_seconds=int(timer), rules=mode)
-                    code, token = service.create_room(db, name, cfg)
-                except (GameError, ValueError) as exc:
-                    st.error(str(exc))
-                except CONNECTION_ERRORS:
-                    st.error("Could not reach the bazaar server. Please try again.")
-                else:
-                    enter_room(code, token)
-    with join_tab:
-        with st.form("join"):
-            code = st.text_input("Room code", value=join_code, max_chars=6, placeholder="ABC123")
-            name = st.text_input("Your name", max_chars=20, key="join_name")
-            if st.form_submit_button("Join room", type="primary", use_container_width=True):
-                try:
-                    token = service.join_room(db, code, name)
-                except GameError as exc:
-                    st.error(str(exc))
-                except CONNECTION_ERRORS:
-                    st.error("Could not reach the bazaar server. Please try again.")
-                else:
-                    enter_room(service.normalize_code(code), token)
+    mode = st.pills("How do you want to play?", list(theme.PLAYER_MODES), default="4", key="home_mode",
+                    format_func=lambda m: theme.PLAYER_MODES[m]["short"]) or "4"
+    info = theme.PLAYER_MODES[mode]
+    st.markdown(f'<div class="bb-panel kasavu"><div class="bb-h" style="margin-top:0">{ui.esc(info["name"])}</div>'
+                f'<div class="bb-muted">{ui.esc(info["text"])}</div></div>', unsafe_allow_html=True)
+    if mode == "tutorial":
+        if st.button("🎓 Start the tutorial", type="primary", use_container_width=True):
+            ss["tutorial"] = tutorial.new_tutorial()
+            st.rerun()
+        st.caption("No other players or sign-up needed. Your progress is not saved and never counts as a result.")
+    else:
+        num_players = int(mode)
+        if join_code:
+            st.info(f"Invited to room **{join_code}** — open the *Join room* tab.")
+        create_tab, join_tab = st.tabs([f"⛵ Create a {num_players}-player room", "🔑 Join room"])
+        with create_tab:
+            with st.form("create"):
+                name = st.text_input("Your name", max_chars=20, placeholder="e.g. Kunjali")
+                labels = list(theme.MARKET_PRESETS)
+                preset = st.selectbox("Market", labels)
+                st.caption("Sets the five starting prices. Classic Kadavu is the balanced default.")
+                timer = st.select_slider("Turn timer", options=[45, 60, 90, 120, 180], value=90,
+                                         format_func=lambda s: f"{s} s")
+                rules = st.radio("Rules", list(theme.RULE_MODE_DISPLAY), horizontal=True,
+                                 format_func=lambda m: theme.RULE_MODE_DISPLAY[m]["name"]
+                                 + (" (recommended)" if m == "full" else ""))
+                st.caption(theme.RULE_MODE_DISPLAY[rules]["text"])
+                if st.form_submit_button("Create room", type="primary", use_container_width=True):
+                    try:
+                        prices = PRESETS[theme.MARKET_PRESETS[preset]]
+                        cfg = GameConfig(starting_prices=dict(prices), turn_seconds=int(timer), rules=rules,
+                                         num_players=num_players)
+                        code, token = service.create_room(db, name, cfg)
+                    except (GameError, ValueError) as exc:
+                        st.error(str(exc))
+                    except CONNECTION_ERRORS:
+                        st.error("Could not reach the bazaar server. Please try again.")
+                    else:
+                        enter_room(code, token)
+        with join_tab:
+            st.caption("The room's player count was chosen by whoever created it.")
+            with st.form("join"):
+                code = st.text_input("Room code", value=join_code, max_chars=6, placeholder="ABC123")
+                name = st.text_input("Your name", max_chars=20, key="join_name")
+                if st.form_submit_button("Join room", type="primary", use_container_width=True):
+                    try:
+                        token = service.join_room(db, code, name)
+                    except GameError as exc:
+                        st.error(str(exc))
+                    except CONNECTION_ERRORS:
+                        st.error("Could not reach the bazaar server. Please try again.")
+                    else:
+                        enter_room(service.normalize_code(code), token)
     with st.expander("📜 How to play"):
         goods = ", ".join(theme.commodity_label(c, english=True) for c in DISPLAY_ORDER)
         cards = " · ".join(theme.card_label(t, english=english()) for t in theme.CARD_DISPLAY)
         st.markdown(
-            "- **4 traders, 8 rounds**, everyone starts with **100 coins** and 3 secret cards.\n"
+            "- **2–4 traders, 8 rounds**, everyone starts with **100 coins** and 3 secret cards.\n"
             f"- Goods: {goods}.\n"
             "- Each round a **rumor** hints at a hidden market event. Secretly choose **one** trade "
             "(buy, sell or hold) and optionally **one card**. Trades settle at the shown price, "
@@ -231,7 +245,7 @@ def home(db: Database) -> None:
 
 @st.fragment(run_every=POLL_SECONDS)
 def live_status(db: Database, code: str, token: str, round_no: int, num_rounds: int,
-                players: list[dict], my_seat: int, i_submitted: bool) -> None:
+                players: list[dict], my_seat: int, i_submitted: bool, mode_label: str = "") -> None:
     """Polled every 2 s. Updates timer and lock markers in place; reruns the page only on a phase change."""
     try:
         heartbeat(db, code, token)
@@ -251,13 +265,15 @@ def live_status(db: Database, code: str, token: str, round_no: int, num_rounds: 
         st.rerun(scope="app")
     left = pulse["seconds_left"]
     n_locked = len(pulse["submitted"])
+    seats = len(players)
     timer_cls = "warn" if left <= 15 else "gold"
     st.markdown(
         f'<div class="bb-row"><span class="bb-chip gold">Round {round_no}/{num_rounds}</span>'
+        f'<span class="bb-chip">{ui.esc(mode_label)}</span>'
         f'<span class="bb-chip">Room {ui.esc(code)}</span>'
-        f'<span class="bb-chip green">{n_locked}/4 locked in</span>'
+        f'<span class="bb-chip green">{n_locked}/{seats} locked in</span>'
         f'<span class="bb-chip {timer_cls}" role="timer">⏱️ {left // 60}:{left % 60:02d}</span></div>'
-        + ui.progress_html((round_no - 1 + n_locked / 4) / num_rounds)
+        + ui.progress_html((round_no - 1 + n_locked / seats) / num_rounds)
         + ui.lock_strip_html(players, pulse["submitted"], pulse["online"]),
         unsafe_allow_html=True)
 
@@ -286,9 +302,11 @@ def lobby(db: Database, code: str, token: str, view: dict) -> None:
                 f'Share the code (or the link <code>?join={ui.esc(code)}</code>). Never share your own page URL — '
                 f'it contains your private seat key.</div></div>', unsafe_allow_html=True)
     players = view["players"]
-    st.markdown(f'<div class="bb-h">Traders {len(players)}/4</div>', unsafe_allow_html=True)
+    seats = view["config"]["num_players"]
+    st.markdown(f'<div class="bb-h">Traders {len(players)}/{seats}</div>'
+                f'<div class="bb-muted">{ui.esc(theme.player_mode_name(seats))}</div>', unsafe_allow_html=True)
     st.markdown(ui.players_html(players, {}, lobby=True), unsafe_allow_html=True)
-    for _ in range(4 - len(players)):
+    for _ in range(seats - len(players)):
         st.markdown('<div class="bb-player" style="margin-top:.45rem"><div class="st">Waiting for a trader…</div></div>',
                     unsafe_allow_html=True)
     me = view["me"]
@@ -305,7 +323,7 @@ def lobby(db: Database, code: str, token: str, view: dict) -> None:
                 st.error(str(exc))
             else:
                 exit_room()
-    st.caption("The game starts automatically when all four traders are ready.")
+    st.caption(f"The game starts automatically when all {seats} traders are ready.")
     cfg = view["config"]
     chips = "".join(f'<span class="bb-chip">{ui.esc(theme.commodity_name(c))} <b>{cfg["starting_prices"][c]}</b></span>'
                     for c in DISPLAY_ORDER)
@@ -342,7 +360,9 @@ def game(db: Database, code: str, token: str, view: dict) -> None:
     en = english()
     round_feedback(view)
     header()
-    live_status(db, code, token, r, n, view["players"], me["seat"], bool(me["submission"]))
+    mode_label = (f'{theme.PLAYER_MODES[str(view["config"]["num_players"])]["short"]} · '
+                  f'{theme.RULE_MODE_DISPLAY[view["config"]["rules"]]["name"]}')
+    live_status(db, code, token, r, n, view["players"], me["seat"], bool(me["submission"]), mode_label)
 
     left, right = st.columns([7, 5], gap="medium")
     with left:
@@ -422,8 +442,8 @@ def locked_panel(view: dict) -> None:
     if sub.get("bid"):
         text += f' · cargo bid {sub["bid"]}'
     st.markdown(f'<div class="bb-locked" role="status"><div style="font-size:1.1rem">🔒 Move accepted: <b>{ui.esc(text)}</b></div>'
-                f'<div class="bb-muted">Waiting for the other traders — the round settles as soon as all four '
-                f'are locked in or the timer ends.</div></div>', unsafe_allow_html=True)
+                f'<div class="bb-muted">Waiting for the other traders — the round settles as soon as everyone '
+                f'is locked in or the timer ends.</div></div>', unsafe_allow_html=True)
 
 
 def action_panel(db: Database, code: str, token: str, view: dict) -> None:
@@ -599,6 +619,109 @@ def results(view: dict) -> None:
                 st.markdown(ui.summary_html(s, pnames, english()), unsafe_allow_html=True)
 
 
+# --------------------------------------------------------------- tutorial
+
+def tutorial_page() -> None:
+    """Guided single-player lessons. State lives only in this browser session (never stored)."""
+    state: tutorial.TutorialState = ss["tutorial"]
+    lesson, en = state.lesson, english()
+    total = len(tutorial.LESSONS)
+    st.markdown(ui.page_width_css(NARROW), unsafe_allow_html=True)
+    header()
+    st.markdown(f'<div class="bb-row"><span class="bb-chip gold">🎓 {ui.esc(theme.PLAYER_MODES["tutorial"]["name"])}</span>'
+                f'<span class="bb-chip">Lesson {state.step + 1}/{total}</span></div>'
+                + ui.progress_html((state.step + (1 if state.finished else 0)) / total), unsafe_allow_html=True)
+    st.markdown(f'<div class="bb-h">{ui.esc(lesson.title)}</div>', unsafe_allow_html=True)
+    st.markdown(lesson.body)
+    if lesson.task:
+        st.markdown(f"**Your task:** {lesson.task}")
+        with st.expander("💡 Hint"):
+            st.markdown(lesson.hint)
+
+    me = state.me
+    st.markdown(ui.market_html(state.prices, None, dict(me.inventory), en), unsafe_allow_html=True)
+    st.markdown(ui.stats_html([(me.coins, "Coins"), (tutorial.net_worth(me, state.prices), "Net worth"),
+                               (f"{me.units()}/{tutorial.CONFIG.inventory_limit}", "Goods held")]),
+                unsafe_allow_html=True)
+
+    if lesson.key == "score":
+        st.markdown(ui.results_table_html(tutorial.standings(state)), unsafe_allow_html=True)
+        st.success("Tutorial complete! Create a 2, 3 or 4-player room to play for real.")
+        if st.button("⛵ Finish and go to the bazaar", type="primary", use_container_width=True):
+            ss.pop("tutorial", None)
+            st.rerun()
+    elif lesson.kind == "info":
+        if st.button("Next lesson ➜", type="primary", use_container_width=True, key=f"tut_next_{state.step}"):
+            tutorial.advance(state)
+            st.rerun()
+    elif state.outcome:
+        lines = "".join(f"<div>{ui.esc(line)}</div>" for line in state.outcome["lines"])
+        st.markdown(f'<div class="bb-result"><b>What happened</b>{lines}'
+                    f'{ui.breakdown_html(state.outcome["breakdown"])}</div>', unsafe_allow_html=True)
+        if st.button("Next lesson ➜", type="primary", use_container_width=True, key=f"tut_next_{state.step}"):
+            tutorial.advance(state)
+            st.rerun()
+    else:
+        tutorial_controls(state)
+
+    c1, c2, c3 = st.columns(3)
+    if not state.finished and c1.button("Skip lesson", use_container_width=True, key=f"tut_skip_{state.step}"):
+        tutorial.skip(state)
+        st.rerun()
+    if c2.button("Restart", use_container_width=True, key="tut_restart"):
+        ss["tutorial"] = tutorial.new_tutorial()
+        st.rerun()
+    if c3.button("Exit tutorial", use_container_width=True, key="tut_exit"):
+        ss.pop("tutorial", None)
+        st.rerun()
+
+
+def tutorial_controls(state: "tutorial.TutorialState") -> None:
+    lesson, step = state.lesson, state.step
+    if lesson.needs_tip:
+        if state.tip_used:
+            ev = theme.event_display(lesson.event)
+            st.markdown(f'<div class="bb-rumor insider"><b>🔍 {ui.esc(theme.card_name("insider_tip"))}</b> '
+                        f'The real event is <b>{ui.esc(theme.event_title(lesson.event, english()))}</b> — '
+                        f'{ui.esc(ev["text"])}</div>', unsafe_allow_html=True)
+        elif st.button(f"🔍 Use {theme.card_name('insider_tip')} now", use_container_width=True, key=f"tut_tip_{step}"):
+            tutorial.use_tip(state)
+            st.rerun()
+    action = st.segmented_control("Action", ["buy", "sell", "hold"], default="hold", key=f"tut_act_{step}",
+                                  format_func=lambda a: theme.ACTION_LABELS[a]) or "hold"
+    commodity, qty = None, 0
+    if action != "hold":
+        commodity = st.pills("Goods", list(DISPLAY_ORDER), default=DISPLAY_ORDER[0], key=f"tut_com_{step}_{action}",
+                             format_func=theme.commodity_name)
+        qty = st.segmented_control("Quantity", list(range(1, tutorial.CONFIG.max_trade_qty + 1)), default=1,
+                                   key=f"tut_qty_{step}_{action}") or 1
+    card = None
+    playable = [c for c in lesson.hand if c != "insider_tip"]
+    if playable:
+        choice = st.radio("Play a card (optional)", [None] + playable, horizontal=True, key=f"tut_card_{step}",
+                          format_func=lambda t: "No card" if t is None else theme.card_label(t))
+        if choice:
+            target = st.pills("Target goods", list(DISPLAY_ORDER), default=DISPLAY_ORDER[0], key=f"tut_tc_{step}",
+                              format_func=theme.commodity_name)
+            card = CardPlay(choice, target)
+    bid = 0
+    if lesson.lot:
+        reserve = tutorial.lot_reserve(tutorial.CONFIG, lesson.lot, state.prices)
+        st.markdown(f'<span class="bb-chip gold">⛵ {ui.esc(theme.CARGO_TITLE)}: {lesson.lot.quantity} × '
+                    f'{ui.esc(theme.commodity_name(lesson.lot.commodity))} · min bid {reserve}</span>',
+                    unsafe_allow_html=True)
+        bid = int(st.number_input("Secret cargo bid", min_value=0, max_value=state.me.coins, value=0, step=1,
+                                  key=f"tut_bid_{step}"))
+    sub = Submission(action, commodity if action != "hold" else None, qty if action != "hold" else 0, card, bid=bid)
+    if st.button("🔒 Lock in move", type="primary", use_container_width=True, key=f"tut_lock_{step}"):
+        problem = tutorial.check(state, sub)
+        if problem:
+            st.warning(problem)
+        else:
+            tutorial.play(state, sub)
+            st.rerun()
+
+
 # ------------------------------------------------------------------- main
 
 @st.fragment(run_every=3)
@@ -651,6 +774,9 @@ def room_page(db: Database, code: str, token: str) -> None:
 
 def main() -> None:
     init_prefs()
+    if ss.get("tutorial"):  # the tutorial needs no database and no other players
+        tutorial_page()
+        return
     try:
         db = get_db()
     except Exception as exc:  # noqa: BLE001 - show setup help instead of a stack trace

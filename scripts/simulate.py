@@ -51,16 +51,20 @@ def mirror(config: GameConfig, games: int, names=ACTIVE) -> str:
 
 
 def ab(config: GameConfig, games: int, label: str, **changes) -> str:
-    lineups = mixed_schedule(BASE5, games)
+    lineups = mixed_schedule(BASE5, games, config.num_players)
     a = summarize(run(config, lineups, STRATEGIES, SEED0))
     b = summarize(run(replace(config, **changes), lineups, STRATEGIES, SEED0))
-    rows = [f"**{label}** (`{', '.join(f'{k}={v}' for k, v in changes.items())}`), {games} matched-seed games",
+    rows = [f"**{label}** (`{', '.join(f'{k}={v}' for k, v in changes.items())}`), {games} matched-seed games, "
+            f"{config.num_players} players, {config.rules} rules",
             "", "| Strategy | Mean A | Mean B | Δ | Win A | Win B |", "|---|---|---|---|---|---|"]
-    for n in BASE5:
+    for n in (n for n in BASE5 if n in a["strategies"]):
         x, y = a["strategies"][n], b["strategies"][n]
         rows.append(f"| {n} | {x['mean']:.1f} | {y['mean']:.1f} | {(y['mean'] / x['mean'] - 1) * 100:+.1f}% | "
                     f"{x['win_rate'] * 100:.1f}% | {y['win_rate'] * 100:.1f}% |")
     rows.append("")
+    cargo = lambda s_: sum(v["cargo"] * v["games"] for v in s_["strategies"].values()) / sum(
+        v["games"] for v in s_["strategies"].values())
+    rows.append(f"Mean cargo value per player A {cargo(a):+.1f} → B {cargo(b):+.1f}")
     rows.append(f"Gap A {a['mean_gap']:.1f} → B {b['mean_gap']:.1f}; comeback A {a['comeback_rate'] * 100:.1f}% → "
                 f"B {b['comeback_rate'] * 100:.1f}%; tie A {a['tie_rate'] * 100:.1f}% → B {b['tie_rate'] * 100:.1f}%")
     return "\n".join(rows)
@@ -88,6 +92,50 @@ def insider_test(config: GameConfig, games: int) -> str:
         rows.append(f"| {label} | {u['mean']:.1f} | {n['mean']:.1f} | {u['mean'] - n['mean']:+.1f} | "
                     f"{u['win_rate'] * 100:.1f}% |")
     return "\n".join(rows)
+
+
+def player_counts(games: int) -> str:
+    """2, 3 and 4 players with the same bot policies and seed range."""
+    out = ["## 5. Player counts (2, 3, 4)", "",
+           "Same strategies and seeds; with N seats, line-ups cycle through every N-strategy subset of "
+           "random/trend/pump/insider/order in every seat rotation. Win rate = share of the games a strategy "
+           "played that it won (ties split). Volatility = mean absolute % price change per commodity per round.", ""]
+    names = ["random", "trend", "pump", "insider", "order"]
+    for rules in ("full", "classic"):
+        names_r = names if rules == "full" else names[:4]
+        out += [f"### {rules.title()} rules", "",
+                "| Players | Games | Tie rate | Seat win rates | Gap | Comeback | Volatility | Cards/player | "
+                "Best strategy (win) | Worst strategy (win) |", "|---|---|---|---|---|---|---|---|---|---|"]
+        for n in (2, 3, 4):
+            cfg = GameConfig(rules=rules, num_players=n)
+            res = run(cfg, mixed_schedule(names_r, games, n), STRATEGIES, SEED0)
+            s = summarize(res)
+            ranked = sorted(s["strategies"].items(), key=lambda kv: -kv[1]["win_rate"])
+            cards = sum(s["card_plays"].values()) / (games * n)
+            out.append(f"| {n} | {games} | {s['tie_rate'] * 100:.1f}% | "
+                       + " / ".join(f"{w * 100:.0f}%" for w in s["seat_win_rate"])
+                       + f" | {s['mean_gap']:.1f} | {s['comeback_rate'] * 100:.1f}% | {s['volatility'] * 100:.2f}% | "
+                         f"{cards:.2f} | {ranked[0][0]} ({ranked[0][1]['win_rate'] * 100:.0f}%) | "
+                         f"{ranked[-1][0]} ({ranked[-1][1]['win_rate'] * 100:.0f}%) |")
+        out.append("")
+    out += ["### Mirror matches (every seat = trend bot), Full Bazaar", "",
+            "| Players | Mean net worth | Median | Price moves | Cards & events | Cargo | Spoiled | Volatility |",
+            "|---|---|---|---|---|---|---|---|"]
+    for n in (2, 3, 4):
+        cfg = GameConfig(num_players=n)
+        s = summarize(run(cfg, [["trend"] * n] * games, STRATEGIES, SEED0))
+        t = s["strategies"]["trend"]
+        out.append(f"| {n} | {t['mean']:.1f} | {t['median']:.1f} | {t['price_moves']:+.1f} | {t['cards_events']:+.1f} | "
+                   f"{t['cargo']:+.1f} | {t['spoiled']:+.1f} | {s['volatility'] * 100:.2f}% |")
+    out.append("")
+    out += ["### Chungam (Tax Collector) by player count, Full Bazaar mixed matches", "",
+            "| Players | Plays per game | Mean cards & events per player |", "|---|---|---|"]
+    for n in (2, 3, 4):
+        res = run(GameConfig(num_players=n), mixed_schedule(names, games, n), STRATEGIES, SEED0)
+        plays = sum(1 for r in res for _, _, c in r.card_plays if c == "tax_collector") / games
+        ce = sum(src["cards_events"] for r in res for src in r.sources) / (games * n)
+        out.append(f"| {n} | {plays:.2f} | {ce:+.1f} |")
+    return "\n".join(out) + "\n"
 
 
 def report(games: int) -> str:
@@ -135,7 +183,7 @@ def report(games: int) -> str:
     for n in BASE5:
         out.append(f"| {n} | {cs2['strategies'][n]['mean']:.1f} / {cs2['strategies'][n]['win_rate'] * 100:.1f}% | "
                    f"{fs2['strategies'][n]['mean']:.1f} / {fs2['strategies'][n]['win_rate'] * 100:.1f}% |")
-    out += ["", health(fs2)]
+    out += ["", health(fs2), "", player_counts(games)]
     return "\n".join(out) + "\n"
 
 
@@ -144,16 +192,21 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("report", help="full markdown report")
     r.add_argument("--games", type=int, default=3000)
+    pc = sub.add_parser("counts", help="2/3/4-player comparison only")
+    pc.add_argument("--games", type=int, default=3000)
     a = sub.add_parser("ab", help="one matched-seed A/B test")
     a.add_argument("--games", type=int, default=3000)
     a.add_argument("--rules", choices=("classic", "full"), default="classic")
+    a.add_argument("--players", type=int, choices=(2, 3, 4), default=4)
     a.add_argument("--set", action="append", default=[], help="config change, e.g. demand_divisor=3")
     args = ap.parse_args()
     if args.cmd == "report":
         print(report(args.games))
+    elif args.cmd == "counts":
+        print(player_counts(args.games))
     else:
         changes = {k: int(v) for k, v in (kv.split("=", 1) for kv in args.set)}
-        print(ab(GameConfig(rules=args.rules), args.games, "A/B", **changes))
+        print(ab(GameConfig(rules=args.rules, num_players=args.players), args.games, "A/B", **changes))
 
 
 if __name__ == "__main__":

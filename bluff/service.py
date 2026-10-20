@@ -187,7 +187,7 @@ def join_room(db: Database, code: str, name: str) -> str:
                              (room["id"],)).fetchall()
         cfg = _config(room)
         if len(taken) >= cfg.num_players:
-            raise GameError("This room is full (4/4 players).")
+            raise GameError(f"This room is full ({cfg.num_players}/{cfg.num_players} players).")
         if name.lower() in {t["n"] for t in taken}:
             raise GameError("That name is already taken in this room.")
         seat = min(set(range(1, cfg.num_players + 1)) - {t["seat"] for t in taken})
@@ -689,6 +689,7 @@ def get_view(db: Database, code: str, token: str) -> dict:
                  "version": room["version"]},
         "config": {**{k: getattr(cfg, k) for k in ("starting_coins", "inventory_limit", "max_trade_qty",
                                                    "num_rounds", "turn_seconds", "starting_prices", "rules",
+                                                   "num_players",
                                                    "season_start", "season_end", "spoil_threshold")},
                    "perishables": list(cfg.perishables),
                    # The monsoon effect is public from the start so players can plan for it.

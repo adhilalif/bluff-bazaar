@@ -725,3 +725,88 @@ class TestMigrations:
             conn.execute(sql)
             assert conn.execute("select relrowsecurity from pg_class where oid = 'bluff.player_orders'::regclass"
                                 ).fetchone()["relrowsecurity"]
+
+
+# ------------------------------------------------------------ 2 and 3 player rooms
+
+def small_room(db, n, rules="full"):
+    from bluff.config import GameConfig
+    code, t1 = service.create_room(db, "Ada", GameConfig(num_players=n, rules=rules))
+    tokens = [t1] + [service.join_room(db, code, name) for name in ("Bo", "Cy", "Di")[:n - 1]]
+    return code, tokens
+
+
+@pytest.mark.parametrize("n", [2, 3])
+class TestSmallerRooms:
+    def test_room_fills_at_n_and_starts_only_when_all_ready(self, db, n):
+        code, tokens = small_room(db, n)
+        with pytest.raises(GameError, match=f"full \\({n}/{n}"):
+            service.join_room(db, code, "Extra")
+        for t in tokens[:-1]:
+            assert service.set_ready(db, code, t, True) is False
+        assert service.set_ready(db, code, tokens[-1], True) is True
+        v = view(db, code, tokens[0])
+        assert v["room"]["status"] == "active" and len(v["players"]) == n
+        assert all(len(view(db, code, t)["me"]["hand"]) == 3 for t in tokens)
+
+    def test_simultaneous_final_submissions_resolve_once(self, db, n):
+        code, tokens = small_room(db, n)
+        for t in tokens:
+            service.set_ready(db, code, t, True)
+        for t in tokens[:-2]:
+            submit(db, code, t)
+        barrier = threading.Barrier(2)
+        results, errors = [], []
+
+        def go(t):
+            barrier.wait()
+            try:
+                results.append(service.submit_action(db, code, t, 1, rid(), "hold"))
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=go, args=(t,)) for t in tokens[-2:]]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        assert not errors and sorted(r["resolved"] for r in results) == [False, True]
+        with db.tx() as conn:
+            rounds = conn.execute("select count(*) n from bluff.rounds r join bluff.rooms m on m.id = r.room_id "
+                                  "where m.code = %s and r.status = 'resolved'", (code,)).fetchone()["n"]
+        assert rounds == 1 and view(db, code, tokens[0])["room"]["round"] == 2
+
+    def test_leave_rejoin_and_reconnect(self, db, n):
+        code, tokens = small_room(db, n)
+        service.leave_room(db, code, tokens[-1])
+        new = service.join_room(db, code, "Eve")
+        assert view(db, code, new)["me"]["seat"] == n
+        for t in tokens[:-1] + [new]:
+            service.set_ready(db, code, t, True)
+        submit(db, code, new, action="buy", commodity="spices", quantity=1)
+        back = view(db, code, new)  # a fresh browser session holding the same token
+        assert back["me"]["submission"]["commodity"] == "spices"
+
+    def test_tax_targets_only_existing_seats(self, db, n):
+        code, tokens = small_room(db, n)
+        for t in tokens:
+            service.set_ready(db, code, t, True)
+        from .conftest import set_events
+        set_events(db, code)
+        tax = give_card(db, code, tokens[0], "tax_collector")
+        with pytest.raises(GameError, match="opponent"):
+            submit(db, code, tokens[0], card_id=tax, target_seat=n + 1)
+        submit(db, code, tokens[0], card_id=tax, target_seat=2)
+        for t in tokens[1:]:
+            submit(db, code, t)
+        assert view(db, code, tokens[0])["me"]["coins"] == 115
+
+    @pytest.mark.parametrize("rules", ["full", "classic"])
+    def test_full_game_finishes(self, db, n, rules):
+        code, tokens = small_room(db, n, rules)
+        for t in tokens:
+            service.set_ready(db, code, t, True)
+        for r in range(1, 9):
+            for t in tokens:
+                submit(db, code, t, r)
+        v = view(db, code, tokens[0])
+        assert v["room"]["status"] == "finished" and len(v["results"]) == n
+        assert all(len(s["players"]) == n for s in v["summaries"])
