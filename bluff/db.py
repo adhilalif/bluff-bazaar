@@ -6,6 +6,7 @@ never sent to a browser.
 """
 from __future__ import annotations
 
+import atexit
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -48,6 +49,7 @@ class Database:
             kwargs={"autocommit": True, "prepare_threshold": None, "row_factory": dict_row},
             open=True,
         )
+        atexit.register(self.close)
 
     @contextmanager
     def tx(self) -> Iterator[psycopg.Connection]:
